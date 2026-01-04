@@ -412,8 +412,8 @@ if purpose == "Epoxies":
     modes.insert(1, "Epoxy stoichiometry (EEW/AHEW)")
 mode = st.radio("Mode", modes, horizontal=True, key=f"form_mode_{purpose}")
 
-    A_all = resolve_list(spec["A"])
-    B_all = resolve_list(spec["B"])
+A_all = resolve_list(spec["A"])
+B_all = resolve_list(spec["B"])
 
     if mode == "Pair screening":
         c1, c2 = st.columns(2)
@@ -790,4 +790,4 @@ with tab_figs:
         st.pyplot(fig2, clear_figure=True)
         st.download_button("Download PNG (Ra vs Π)", fig_to_png_bytes(fig2),
                            file_name=f"FIG_Ra_vs_Pi_{purpose_p}.png", mime="image/png",
-                           key=f"dl_fig_pi_{purpose_p}")
+                           key=f"dl_fig_pi_{purpose_p}")    
