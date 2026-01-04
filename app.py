@@ -415,7 +415,7 @@ mode = st.radio("Mode", modes, horizontal=True, key=f"form_mode_{purpose}")
 A_all = resolve_list(spec["A"])
 B_all = resolve_list(spec["B"])
 
-    if mode == "Pair screening":
+if mode == "Pair screening":
         c1, c2 = st.columns(2)
         with c1:
             A = label_select(f"{spec['A_name']} (A)", A_all, key=f"pair_A_{purpose}")
@@ -442,7 +442,7 @@ B_all = resolve_list(spec["B"])
         m4.metric("Π", f"{pi:.3f}")
         m5.metric("Score (%)", f"{sc:.1f}")
 
-    elif mode == "PU stoichiometry (NCO/OH)":
+elif mode == "PU stoichiometry (NCO/OH)":
         st.markdown("### PU stoichiometry")
         st.caption("Uses **total batch mass target** OR polyol-side mass. Inputs can be auto-filled from the equivalents library.")
 
@@ -550,7 +550,7 @@ B_all = resolve_list(spec["B"])
             df["Score_%"] = [score_percent(r,p,d,raM,piM,daM) for r,p,d in zip(df["Ra"],df["Π"],df["Δδa"])]
             st.dataframe(df, use_container_width=True, hide_index=True)
 
-    elif mode == "Epoxy stoichiometry (EEW/AHEW)":
+elif mode == "Epoxy stoichiometry (EEW/AHEW)":
         st.markdown("### Epoxy stoichiometry")
         st.caption("Uses **total batch mass target** OR resin-side mass. Inputs can be auto-filled from the equivalents library.")
 
@@ -790,4 +790,4 @@ with tab_figs:
         st.pyplot(fig2, clear_figure=True)
         st.download_button("Download PNG (Ra vs Π)", fig_to_png_bytes(fig2),
                            file_name=f"FIG_Ra_vs_Pi_{purpose_p}.png", mime="image/png",
-                           key=f"dl_fig_pi_{purpose_p}")    
+                           key=f"dl_fig_pi_{purpose_p}")
