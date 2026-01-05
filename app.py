@@ -222,8 +222,17 @@ def list_by_class(cls):
 
 # convenience name labels
 def label(abbr: str) -> str:
+    """Label shown in dropdowns.
+    If the resolved name is missing or equals the abbreviation, do NOT repeat
+    (prevents '1,4-BDO — 1,4-BDO').
+    """
     nm = _name_of(abbr)
-    return f"{abbr} — {nm}"
+    base = str(abbr).strip()
+    nm_s = str(nm).strip()
+    if nm_s.lower() in ('', 'nan', 'none') or nm_s == base:
+        return base
+    return f"{base} — {nm_s}"
+
 
 def select_abbr(title: str, options: list[str], key: str):
     if not options:
