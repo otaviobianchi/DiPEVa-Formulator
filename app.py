@@ -62,7 +62,10 @@ if missing:
 
 # Build table indexed by Abbrev
 T = df_raw.copy()
-T["__abbr__"] = T[COL["abbr"]].astype(str).str.strip()
+T["__abbr__"] = (T[COL["abbr"]].astype(str)
+    .str.replace("\s+", " ", regex=True)
+    .str.strip()
+    .str.upper())
 T = T[T["__abbr__"].ne("")].copy()
 
 # Deduplicate by Abbrev (keep first)
@@ -178,7 +181,8 @@ T["__class__"] = [classify_row(i, T.loc[i]) for i in T.index]
 
 # Families for heatmaps
 def list_by_class(cls):
-    return sorted([i for i in T.index if T.loc[i, "__class__"] == cls])
+    opts = [i for i in T.index if T.loc[i, "__class__"] == cls]
+    return list(dict.fromkeys(opts))
 
 # convenience name labels
 def label(abbr: str) -> str:
@@ -189,10 +193,20 @@ def select_abbr(title: str, options: list[str], key: str):
     if not options:
         st.warning(f"No options found for: {title}")
         return None
-    # show labels but return abbr
-    labels = {label(o): o for o in options}
-    choice = st.selectbox(title, list(labels.keys()), key=key)
-    return labels[choice]
+    options = list(dict.fromkeys(options))
+    labels = [label(o) for o in options]
+    seen = {}
+    final_labels = []
+    for lab in labels:
+        if lab not in seen:
+            seen[lab] = 1
+            final_labels.append(lab)
+        else:
+            seen[lab] += 1
+            final_labels.append(f"{lab}  (dup {seen[lab]})")
+    mapping = dict(zip(final_labels, options))
+    choice = st.selectbox(title, final_labels, key=key)
+    return mapping[choice]
 
 def show_props(abbr: str):
     if not abbr:
@@ -476,6 +490,8 @@ with tab_form:
             if resin and cand:
                 rows=[]
                 for c in cand:
+                    if c == resin:
+                        continue
                     a=T.loc[c]; b=T.loc[resin]
                     ra=Ra(a,b); da=delta_a(a,b); ds=delta_sigmaL(a,b)
                     pi=Pi(da, ds, da_max, ds_max)
@@ -492,6 +508,8 @@ with tab_form:
             if iso and cand:
                 rows=[]
                 for c in cand:
+                    if c == iso:
+                        continue
                     a=T.loc[c]; b=T.loc[iso]
                     ra=Ra(a,b); da=delta_a(a,b); ds=delta_sigmaL(a,b)
                     pi=Pi(da, ds, da_max, ds_max)
@@ -623,6 +641,8 @@ with tab_figs:
         for a_id in A_list:
             a = T.loc[a_id]
             for b_id in B_list:
+                if a_id == b_id:
+                    continue
                 b = T.loc[b_id]
                 ra = Ra(a,b)
                 da = delta_a(a,b)
