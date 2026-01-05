@@ -1,0 +1,37 @@
+Abbrev,Kind,NCO_wt_percent,OH_mgKOH_g,EEW_g_eq,AHEW_g_eq,Notes
+HDI,isocyanate,33.3,,,,Typical HDI ~33.3% NCO
+IPDI,isocyanate,37.5,,,,Typical IPDI ~37.5% NCO
+H12MDI,isocyanate,21.8,,,,Check supplier TDS
+"MDI 4,4′",isocyanate,33.6,,,,Pure MDI ~33.6% NCO
+"MDI 2,4′",isocyanate,33.6,,,,
+"TDI 2,4",isocyanate,48.3,,,,
+"TDI 2,6",isocyanate,48.3,,,,
+"TDI 80/20",isocyanate,48.3,,,,
+"pMDI (polymeric MDI)",isocyanate,31.5,,,,
+"1,4-BDO",polyol,,1246,,,Diol (OH# depends purity)
+"1,6-HDO",polyol,,920,,,Diol
+EG,polyol,,1800,,,Diol
+PG,polyol,,1475,,,Diol
+MPG,polyol,,1475,,,
+DEA,polyol,,1060,,,Amine-initiated diol; confirm
+TEA,polyol,,1120,,,Triol; confirm
+MEA,polyol,,918,,,Monoethanolamine; confirm
+PEG200,polyol,,560,,,Approximate
+PEG400,polyol,,280,,,Approximate
+PEG600,polyol,,187,,,Approximate
+PPG500,polyol,,225,,,Approximate
+PTMEG1000,polyol,,112,,,Approximate
+PCDL500,polyol,,224,,,Approximate
+PCDL1000,polyol,,112,,,Approximate
+PCL1000,polyol,,112,,,Approximate
+DGEBA,epoxy,,,185,,Typical EEW for DGEBA
+"BDGE (aliphatic epoxy)",epoxy,,,150,,Aliphatic epoxy; confirm
+DDM,hardener,,,,49,Approx. AHEW; confirm
+DDS,hardener,,,,62,Approx. AHEW; confirm
+DETA,hardener,,,,20,Approx. AHEW; confirm
+TETA,hardener,,,,24,Approx. AHEW; confirm
+DICY,hardener,,,,21,Latent hardener; effective AHEW depends formulation
+ECH,diluent,,,92,,Epichlorohydrin (if treated as epoxy eq)
+ECA,diluent,,,88,,Ethylene carbonate (if used as reactive); confirm
+PCA,diluent,,,102,,Propylene carbonate; confirm
+GBL,diluent,,,86,,Gamma-butyrolactone; confirm
