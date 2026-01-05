@@ -66,6 +66,42 @@ T["__abbr__"] = (T[COL["abbr"]].astype(str)
     .str.replace("\s+", " ", regex=True)
     .str.strip()
     .str.upper())
+
+# Make a UNIQUE identifier for UI selections / indexing.
+# If the same Abbrev appears multiple times (e.g., "1,4-BDO" vs "1,4BDO" or duplicates),
+# append CAS (if available) or a running counter.
+T["__id__"] = T["__abbr__"].copy()
+if COL.get("cas") and COL["cas"] in T.columns:
+    cas_series = T[COL["cas"]].astype(str).str.strip()
+else:
+    cas_series = pd.Series([""]*len(T), index=T.index)
+
+dup_mask = T["__id__"].duplicated(keep=False)
+if dup_mask.any():
+    # Prefer CAS disambiguation when present
+    for i in T.index[dup_mask]:
+        cas = cas_series.loc[i]
+        if cas and cas.lower() != "nan":
+            T.at[i, "__id__"] = f'{T.at[i, "__abbr__"]} [{cas}]'
+    # If still duplicated, add counters
+    ids = T["__id__"].tolist()
+    seen = {}
+    new_ids = []
+    for s in ids:
+        if s not in seen:
+            seen[s] = 1
+            new_ids.append(s)
+        else:
+            seen[s] += 1
+            new_ids.append(f"{s} #{seen[s]}")
+    T["__id__"] = new_ids
+
+# Keep base abbreviation for chemistry logic
+T["__abbr_base__"] = T["__abbr__"]
+
+# Use __id__ as the unique index for all selections and computations
+T = T.set_index("__id__", drop=False)
+
 T = T[T["__abbr__"].ne("")].copy()
 
 # Deduplicate by Abbrev (keep first)
