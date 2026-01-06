@@ -327,6 +327,15 @@ def estimate_epoxy_function(abbr: str) -> int:
         if any(k in name for k in ["mono", "monoglycidyl", "glycidyl ether", "glycidyl ester"]):
             return 1
 
+        # Strong cues for multi-functional epoxies (resins) even when SMILES is missing
+        if ("cycloaliphatic" in name) or ("aliphatic epoxy" in name) or ("epoxy cycloaliphatic" in name):
+            return 2
+        if "triglycidyl" in name or "glycidyl" in name and "tri" in name:
+            return 3
+        if "tetraglycidyl" in name or "tetra" in name and "glycidyl" in name:
+            return 4
+
+
     # Abbrev / resin heuristics
     if ab in {"DGEBA", "DGEBF", "EPN", "ECN"}:
         return 2
@@ -378,6 +387,17 @@ if "__epoxy_fn__" not in T.columns:
     except Exception:
         # Fail-safe: keep app running even if SMILES are missing/unparseable
         T["__epoxy_fn__"] = 0
+
+# Precomputed epoxy candidate pools (used for reactive diluents/resins filters)
+EPOXY_CANDIDATES = []
+if "__epoxy_fn__" in T.columns:
+    try:
+        EPOXY_CANDIDATES = [a for a in T.index if int(T.loc[a, "__epoxy_fn__"]) > 0]
+    except Exception:
+        EPOXY_CANDIDATES = []
+EPOXY_MONO = [a for a in EPOXY_CANDIDATES if int(T.loc[a, "__epoxy_fn__"]) == 1] if EPOXY_CANDIDATES else []
+EPOXY_MULTI = [a for a in EPOXY_CANDIDATES if int(T.loc[a, "__epoxy_fn__"]) >= 2] if EPOXY_CANDIDATES else []
+
 
 def classify_row(abbr: str, row: pd.Series) -> str:
     name = _name_of(abbr).lower()
@@ -855,9 +875,9 @@ with tab_form:
             use_dil = st.checkbox("Include reactive diluent", value=False, key="ep_use_dil")
 
         fn_target = st.slider("Reactive diluent — epoxy functionality filter (estimated)", 1, 4, 1, step=1, key="ep_fn_target")
-        ep_dils = [a for a in ep_dils_all if int(T.loc[a, "__epoxy_fn__"]) == int(fn_target)]
+        ep_dils = [a for a in EPOXY_CANDIDATES if int(T.loc[a, "__epoxy_fn__"]) == int(fn_target)]
         if use_dil and (not ep_dils):
-            ep_dils = [a for a in ep_dils_all if int(T.loc[a, "__epoxy_fn__"]) >= 1]
+            ep_dils = [a for a in EPOXY_CANDIDATES if int(T.loc[a, "__epoxy_fn__"]) >= 1]
 
         dil = None
         if use_dil:
@@ -928,7 +948,7 @@ with tab_form:
             resin = select_abbr("Resin (fixed)", ep_resins, key="rk_ep_resin")
             include_dil = st.checkbox("Include reactive diluents in ranking", value=True, key="rk_ep_dil")
             fn_target = st.slider("Reactive diluent epoxy functionality (ranking)", 1, 4, 1, step=1, key="rk_ep_fn")
-            dil_cand = [a for a in ep_dils_all if int(T.loc[a, "__epoxy_fn__"]) == int(fn_target)]
+            dil_cand = [a for a in EPOXY_CANDIDATES if int(T.loc[a, "__epoxy_fn__"]) == int(fn_target)]
             cand = ep_hards + (dil_cand if include_dil else [])
             cand = [c for c in cand if c in T.index]
             if resin and cand:
@@ -1203,9 +1223,9 @@ with tab_maps:
             st.pyplot(fig)
 
         fn_target = st.slider("Reactive diluents — epoxy functionality (heatmap)", 1, 4, 1, step=1, key="hm_ep_fn")
-        ep_dils = [a for a in ep_dils_all if int(T.loc[a, "__epoxy_fn__"]) == int(fn_target)]
+        ep_dils = [a for a in EPOXY_CANDIDATES if int(T.loc[a, "__epoxy_fn__"]) == int(fn_target)]
         if not ep_dils:
-            ep_dils = [a for a in ep_dils_all if int(T.loc[a, "__epoxy_fn__"]) >= 1]
+            ep_dils = [a for a in EPOXY_CANDIDATES if int(T.loc[a, "__epoxy_fn__"]) >= 1]
 
         dil_sel = st.multiselect(
             "Reactive diluents (rows)",
