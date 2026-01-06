@@ -191,54 +191,146 @@ def label(abbr: str) -> str:
     return f"{base} — {nm_s}"
 
 def classify_row(abbr: str, row: pd.Series) -> str:
+    """Heuristic classification for UI grouping (heatmaps/formulator).
+
+    Note: the editable *equivalents library* can override the final role later.
+    """
     name = _name_of(abbr).lower()
-    a = abbr.lower()
+    a = str(abbr).lower()
 
-    # hard overrides by equivalents library
-    eq = equiv_lookup(abbr)
-    role = str(eq.get("Role", "")).strip().lower()
-    if role:
-        if "isocyanate" in role: return "isocyanate"
-        if "epoxy resin" in role: return "epoxy_resin"
-        if role in ("hardener", "amine hardener", "epoxy hardener"): return "epoxy_hardener"
-        if "reactive diluent" in role: return "reactive_diluent"
-        if "extender" in role: return "extender"
-        if "crosslinker" in role or "triol" in role: return "crosslinker"
-
-    # PU isocyanates
-    if "diisocyanate" in name or re.search(r"\bmdi\b|\btdi\b|\bhdi\b|\bipdi\b|\bh12mdi\b|\bpmdi\b", a):
+    # -----------------
+    # PU family
+    # -----------------
+    if (
+        "isocyanate" in name
+        or re.search(r"\bmdi\b|\btdi\b|\bhdi\b|\bipdi\b|\bpmdi\b|\bh12mdi\b", a)
+        or re.search(r"\bmdi\b|\btdi\b|\bhdi\b|\bipdi\b|\bpmdi\b|\bh12mdi\b", name)
+    ):
         return "isocyanate"
 
-    # alcohols / polyols / extenders
-    if any(k in name for k in ["butanediol", "hexanediol", "ethanediol", "ethylene glycol", "propylene glycol", "neopentyl glycol", "diol", "glycol"]):
-        return "extender"
-    if any(k in name for k in ["triol", "trimethylol", "glycerol", "pentaerythritol", "sorbitol"]):
+    # Triols / multifunctional crosslinkers (keep as a dedicated class)
+    if (
+        "triol" in name
+        or "glycer" in name
+        or "sorbit" in name
+        or "pentaerythrit" in name
+        or re.search(r"\btmp\b|\bgly\b|\bper\b|\bsor\b", a)
+    ):
         return "crosslinker"
-    if "polyol" in name or re.search(r"\bpeg\d+|\bppg\d+|\bptmeg\b|\bpcl\d+|\bpcdl\b|\bpcl\b", a):
+
+    # Small-molecule chain extenders (diols) — include EG/DEG/TEG + aliphatic diols
+    if (
+        "butanediol" in name
+        or "hexanediol" in name
+        or "propanediol" in name
+        or re.search(r"\beg\b|\bdeg\b|\bteg\b", a)
+        or re.search(r"\b1,?3-?bdo\b|\b1,?4-?bdo\b|\b2,?3-?bdo\b|\b1,?5-?pedo\b|\b1,?6-?hdo\b", a)
+        or re.search(r"\bmpg\b|\bpg\b|\bdpg\b|\bnpg\b", a)
+    ):
+        return "extender"
+
+    # Polyols (oligomeric / polymeric diols)
+    if (
+        "polyol" in name
+        or "polyether" in name
+        or "polyester" in name
+        or "polycarbonate" in name
+        or "diol" in name
+        or re.search(r"\bpeg\d+|\bppg\d+|\bptmeg\d*|\bpcl\d+|\bpcdl\d+|\bpbd\d*", a)
+    ):
         return "polyol"
 
-    # Polyester acids/anhydrides
-    if "acid" in name or "anhydride" in name or re.search(r"\bmah\b|\bhhpa\b|\bmhhpa\b", a):
+    # -----------------
+    # Polyester acids / anhydrides (include diacids)
+    # -----------------
+    acid_abbr = {
+        "aa", "sa", "pa", "ga", "ma", "la", "oa", "fa", "ipa", "tpa", "sua", "sea",
+        "mah", "hhpa", "mhhpa"
+    }
+    if (
+        "acid" in name
+        or "diacid" in name
+        or "dicarbox" in name
+        or "anhydride" in name
+        or a in acid_abbr
+        or re.search(r"\b(phthalic|isophthalic|terephthalic|succinic|sebacic|adipic|glutaric|malonic|maleic|fumaric)\b", name)
+        or re.search(r"\bmah\b|\bhhpa\b|\bmhhpa\b", a)
+    ):
         return "acid_anhydride"
 
+    # -----------------
     # Epoxy family
-    if "epoxy" in name or "glycidyl" in name or re.search(r"\bdgeba\b|\bdgebf\b|\bbdge\b|\bepoxy\b", a):
+    # -----------------
+    if (
+        "epoxy" in name
+        or "oxirane" in name
+        or re.search(r"\bdgeba\b|\bdgebf\b|\bdge\b|\bbdge\b|\bdge\w+", a)
+    ):
+        # Distinguish resins vs reactive diluents (best-effort)
+        if (
+            "bisphenol" in name
+            or "novolac" in name
+            or "resin" in name
+            or re.search(r"\bdgeba\b|\bdgebf\b", a)
+        ):
+            return "epoxy_resin"
+        # Many reactive diluents are glycidyl ethers/esters w/out bisphenol backbone
+        if "glycidyl" in name or "diluent" in name or "ether" in name:
+            return "reactive_diluent"
+        # fallback
         return "epoxy_resin"
-    if "amine" in name or "diamine" in name or re.search(r"\bdeta\b|\bteta\b|\bddm\b|\bdds\b|\bdicy\b", a):
-        return "epoxy_hardener"
-    if any(k in name for k in ["carbonate", "lactone", "glyme", "ether"]):
-        return "reactive_diluent"
 
-    # Vinyl monomers
-    if any(k in name for k in ["styrene", "acrylonitrile", "methacrylate", "vinyl acetate", "vinyl"]):
+    if (
+        "amine" in name
+        or "diamin" in name
+        or "polyamine" in name
+        or "hardener" in name
+        or "curing" in name
+        or re.search(r"\bdeta\b|\bteta\b|\bddm\b|\bdds\b|\bdicy\b|\bipda\b|\bjeffamine\b", a)
+    ):
+        return "epoxy_hardener"
+
+    # -----------------
+    # Vinyl family
+    # -----------------
+    if (
+        "styrene" in name
+        or "acrylonitrile" in name
+        or "methacrylate" in name
+        or "acrylate" in name
+        or "vinyl acetate" in name
+        or "alpha-methylstyrene" in name
+        or re.search(r"\bst\b|\ban\b|\bmma\b|\bva\b|\bvac\b|\bfn\b|\bα-ms\b|\ba-ms\b", a)
+    ):
         return "vinyl_monomer"
 
-    # Solvents/plasticizers
-    if any(k in name for k in ["alcohol", "phthalate", "benzoate", "adipate", "phosphate", "solvent"]):
+    # -----------------
+    # Solvents / plasticizers
+    # -----------------
+    solv_abbr = {
+        "etoh", "meoh", "ipoh", "i-proh", "nproh", "n-proh", "bnoh", "cyoh", "2-eh",
+        "dmc", "dmm", "dmo", "dec", "eb", "tbp", "tcp", "dbp", "dehp", "dinp"
+    }
+    if (
+        "alcohol" in name
+        or "solvent" in name
+        or "plasticizer" in name
+        or "phthalate" in name
+        or "phosphate" in name
+        or "adipate" in name
+        or "benzoate" in name
+        or a in solv_abbr
+        or re.search(r"\bethanol\b|\bmethanol\b|\bpropanol\b|\bbutanol\b", name)
+    ):
         return "solvent_plasticizer"
 
+    # -----------------
     # Silanes
-    if "silane" in name or re.search(r"\bteos\b|\bvtms\b|\baptes\b|\bmptes\b|\bvtms\b", a):
+    # -----------------
+    if (
+        "silane" in name
+        or re.search(r"\bteos\b|\bvtms\b|\bvtmsoh\b|\btms-oh\b|\baptes\b|\bmptes\b|\bvtms\b", a)
+    ):
         return "silane"
 
     return "other"
@@ -717,6 +809,27 @@ with tab_maps:
     isos = list_by_class("isocyanate")
     polyols = list_by_class("polyol")
     extenders = list_by_class("extender")
+    crosslinkers = list_by_class("crosslinker")
+
+    # Enrich lists using the editable equivalents library (roles)
+    eqdf_hm = get_equiv_df()
+    _role = eqdf_hm.set_index("Abbrev")["Role"].astype(str).str.lower()
+    # Polyester targets
+    acids = sorted(set(acids + [a for a,r in _role.items() if r in ("diacid","acid","anhydride")]))
+    # PU extenders/crosslinkers
+    extenders = sorted(set(extenders + [a for a,r in _role.items() if "extender" in r]))
+    crosslinkers = sorted(set(crosslinkers + [a for a,r in _role.items() if ("crosslinker" in r or "triol" in r)]))
+    # Epoxy
+    ep_resins = sorted(set(ep_resins + [a for a,r in _role.items() if r == "epoxy resin"]))
+    ep_hards  = sorted(set(ep_hards  + [a for a,r in _role.items() if ("hardener" in r or "amine" in r)]))
+    ep_dils   = sorted(set(ep_dils   + [a for a,r in _role.items() if "diluent" in r]))
+    # Filter to compounds that exist in the database
+    acids = [a for a in acids if a in T.index]
+    extenders = [a for a in extenders if a in T.index]
+    crosslinkers = [a for a in crosslinkers if a in T.index]
+    ep_resins = [a for a in ep_resins if a in T.index]
+    ep_hards  = [a for a in ep_hards if a in T.index]
+    ep_dils   = [a for a in ep_dils if a in T.index]
     crosslinkers = list_by_class("crosslinker") if "crosslinker" in set(T["__class__"]) else []
     ep_resins = list_by_class("epoxy_resin")
     ep_hards = list_by_class("epoxy_hardener")
@@ -755,11 +868,11 @@ with tab_maps:
     )
 
     if purpose == "Polyesters":
-        st.caption("Acids/anhydrides × polyols (heatmap).")
+        st.caption("Polyols/diols/triols × diacids/anhydrides (heatmap).")
         left = st.multiselect(
             "Polyols (rows)",
-            polyols,
-            default=_default(polyols, 18),
+            sorted(set(polyols + extenders + crosslinkers)),
+            default=_default(sorted(set(polyols + extenders + crosslinkers)), 18),
             format_func=label,
             key="hm_polyesters_rows",
         )
@@ -772,7 +885,7 @@ with tab_maps:
         )
         if left and right:
             mat = build_matrix(left, right)
-            fig = plot_heatmap(mat, f"POLYESTERS — Polyols × Acids/Anhydrides ({metric})", cbar_label)
+            fig = plot_heatmap(mat, f"POLYESTERS — Polyols/Diols/Triols × Diacids/Anhydrides ({metric})", cbar_label)
             st.pyplot(fig)
 
     elif purpose == "Polyurethanes":
@@ -790,8 +903,8 @@ with tab_maps:
 
         pol_sel = st.multiselect(
             "Polyols (rows)",
-            polyols,
-            default=_default(polyols, 18),
+            sorted(set(polyols + extenders + crosslinkers)),
+            default=_default(sorted(set(polyols + extenders + crosslinkers)), 18),
             format_func=label,
             key="hm_pu_polyols",
         )
@@ -871,7 +984,7 @@ with tab_maps:
         sol_sel = st.multiselect(
             "Solvents/plasticizers (cols)",
             solv,
-            default=_default(solv, 18),
+            default=solv,
             format_func=label,
             key="hm_vinyl_solv",
         )
@@ -955,13 +1068,13 @@ with tab_figs:
     elif fam == "Epoxies":
         res_sel = st.multiselect("Resins", ep_resins, default=_def(ep_resins, 5), format_func=label)
         hard_sel = st.multiselect("Hardeners", ep_hards, default=_def(ep_hards, 10), format_func=label)
-        dil_sel = st.multiselect("Reactive diluents", ep_dils, default=_def(ep_dils, 8), format_func=label)
+        dil_sel = st.multiselect("Reactive diluents", ep_dils, default=ep_dils, format_func=label)
         df1 = make_pairs(hard_sel, res_sel, tagA="hard", tagB="resin")
         df2 = make_pairs(dil_sel, res_sel, tagA="dil", tagB="resin")
         dfp = pd.concat([df1, df2], ignore_index=True) if (not df1.empty or not df2.empty) else pd.DataFrame()
     elif fam == "Vinyls":
-        mon_sel = st.multiselect("Monomers", list_by_class("vinyl_monomer"), default=_def(list_by_class("vinyl_monomer"), 10), format_func=label)
-        sol_sel = st.multiselect("Solvents/plasticizers", list_by_class("solvent_plasticizer"), default=_def(list_by_class("solvent_plasticizer"), 12), format_func=label)
+        mon_sel = st.multiselect("Monomers", list_by_class("vinyl_monomer"), default=list_by_class("vinyl_monomer"), format_func=label)
+        sol_sel = st.multiselect("Solvents/plasticizers", list_by_class("solvent_plasticizer"), default=list_by_class("solvent_plasticizer"), format_func=label)
         dfp = make_pairs(mon_sel, sol_sel, tagA="mon", tagB="solv")
     else:
         sil_sel = st.multiselect("Silanes", list_by_class("silane"), default=_def(list_by_class("silane"), 10), format_func=label)
