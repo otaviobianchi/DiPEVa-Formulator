@@ -276,35 +276,70 @@ def _count_epoxide_rings(smiles: str) -> int:
     return int(n)
 
 def estimate_epoxy_function(abbr: str) -> int:
-    name = _name_of(abbr).lower()
-    smi  = _smiles_of(abbr)
-    ab_l = str(abbr).lower()
+    """Estimate epoxy functionality (number of epoxide groups).
 
-    # quick reject unless there is any epoxy hint in name/abbr
-    if (not _EPOXY_HINT_RE.search(name)) and (not re.search(r"\bdge", ab_l)):
+    Priority:
+      1) If SMILES/BigSMILES exists, count epoxide rings by common substructures.
+      2) Otherwise, fall back to name/abbrev heuristics.
+
+    Returns:
+      0 if no epoxy detected, otherwise a positive integer (capped at 4).
+    """
+    ab = str(abbr).strip().upper()
+    if ab not in T.index:
         return 0
 
-    n = _count_epoxide_rings(smi or "")
-    if n > 0:
-        return int(n)
+    # --- 1) SMILES-based (best effort)
+    smi_col = COL.get("smiles")
+    smi = None
+    if smi_col and smi_col in T.columns:
+        v = T.loc[ab, smi_col]
+        if isinstance(v, str) and v.strip() and v.strip().lower() not in ("nan", "none"):
+            smi = v.strip()
 
-    # fallback by name keywords (common naming conventions)
-    if "diglycidyl" in name:
+    if smi:
+        s = smi
+        # Common epoxide ring patterns in SMILES:
+        #   - C1OC1 (oxirane)
+        #   - C1CO1 / O1CC1 (equivalent orderings)
+        # Also catch substituted patterns like O1C(C)C1 etc.
+        pats = [
+            r"C1OC1",
+            r"C1CO1",
+            r"O1CC1",
+            r"O1C[^\n]{0,8}?C1",  # short ring fragment
+        ]
+        cnt = 0
+        for p in pats[:3]:
+            cnt = max(cnt, len(re.findall(p, s)))
+        # If the strict patterns fail, try the looser one once
+        if cnt == 0 and re.search(pats[3], s):
+            cnt = 1
+        if cnt > 0:
+            return int(min(cnt, 4))
+
+    # --- 2) Heuristics (name/abbr)
+    name = _name_of(ab).lower()
+
+    # strong cues
+    if any(k in name for k in ["oxirane", "epoxy", "epoxide", "glycidyl"]):
+        # mono-glycidyl compounds are typically monofunctional
+        if any(k in name for k in ["mono", "monoglycidyl", "glycidyl ether", "glycidyl ester"]):
+            return 1
+
+    # Abbrev / resin heuristics
+    if ab in {"DGEBA", "DGEBF", "EPN", "ECN"}:
         return 2
-    if "triglycidyl" in name:
-        return 3
-    if "tetraglycidyl" in name:
-        return 4
-    if "glycidyl" in name:
+    if "DGE" in ab or "BDGE" in ab or "GDE" in ab:
+        # Many glycidyl ethers are difunctional, but keep conservative:
+        return 1 if "MONO" in ab else 2
+
+    # If it looks like a reactive diluent by name, assume 1
+    if "diluent" in name:
         return 1
-
-    # typical diepoxy backbones
-    if re.search(r"\bdgeba\b|\bdgebf\b|\bdgef\b", ab_l):
-        return 2
 
     return 0
 
-T["__epoxy_fn__"] = [estimate_epoxy_function(i) for i in T.index]
 
 def estimate_EEW_from_db_or_mw(abbr: str) -> float:
     eq = equiv_lookup(abbr)
@@ -602,10 +637,32 @@ with tab_form:
         + [a for a in T.index if int(T.loc[a, "__epoxy_fn__"]) >= 2]
     ))
 
-    ep_dils_all = sorted(set(
-        list_by_class("reactive_diluent")
-        + [a for a in T.index if int(T.loc[a, "__epoxy_fn__"]) == 1]
-    ))
+    # Reactive diluents (article-aligned): any **monofunctional** epoxy.
+    # If the database does not explicitly tag it, we rely on estimated epoxy functionality.
+    # Exclude backbone resins (e.g., DGEBA/DGEBF/novolacs), but keep small mono-epoxies.
+    ep_dils_all = []
+    for a in T.index:
+        cls = str(T.loc[a, "__class__"])
+        fn = int(T.loc[a, "__epoxy_fn__"]) if not pd.isna(T.loc[a, "__epoxy_fn__"]) else 0
+        nm = _name_of(a).lower()
+
+        is_backbone_resin = (
+            cls == "epoxy_resin"
+            and (("bisphenol" in nm) or ("novolac" in nm) or ("resin" in nm) or (a in {"DGEBA", "DGEBF", "EPN", "ECN"}))
+        )
+
+        looks_epoxy = (fn >= 1) or any(k in nm for k in ["epoxy", "oxirane", "epoxide", "glycidyl"])
+        if not looks_epoxy:
+            continue
+
+        if fn == 1 and not is_backbone_resin and cls != "epoxy_hardener":
+            ep_dils_all.append(a)
+        # If fn is unknown (0), still include if name strongly indicates glycidyl diluent and it's not a backbone resin
+        elif fn == 0 and ("glycidyl" in nm or "reactive diluent" in nm or "diluent" in nm) and (not is_backbone_resin) and cls != "epoxy_hardener":
+            ep_dils_all.append(a)
+
+    # Keep any explicitly tagged reactive diluents too
+    ep_dils_all = sorted(set(list_by_class("reactive_diluent") + ep_dils_all))
 
     # Enrich lists using equivalents library roles (editable)
     eqdf = get_equiv_df()
@@ -924,10 +981,32 @@ with tab_maps:
         list_by_class("epoxy_resin")
         + [a for a in T.index if int(T.loc[a, "__epoxy_fn__"]) >= 2]
     ))
-    ep_dils_all = sorted(set(
-        list_by_class("reactive_diluent")
-        + [a for a in T.index if int(T.loc[a, "__epoxy_fn__"]) == 1]
-    ))
+    # Reactive diluents (article-aligned): any **monofunctional** epoxy.
+    # If the database does not explicitly tag it, we rely on estimated epoxy functionality.
+    # Exclude backbone resins (e.g., DGEBA/DGEBF/novolacs), but keep small mono-epoxies.
+    ep_dils_all = []
+    for a in T.index:
+        cls = str(T.loc[a, "__class__"])
+        fn = int(T.loc[a, "__epoxy_fn__"]) if not pd.isna(T.loc[a, "__epoxy_fn__"]) else 0
+        nm = _name_of(a).lower()
+
+        is_backbone_resin = (
+            cls == "epoxy_resin"
+            and (("bisphenol" in nm) or ("novolac" in nm) or ("resin" in nm) or (a in {"DGEBA", "DGEBF", "EPN", "ECN"}))
+        )
+
+        looks_epoxy = (fn >= 1) or any(k in nm for k in ["epoxy", "oxirane", "epoxide", "glycidyl"])
+        if not looks_epoxy:
+            continue
+
+        if fn == 1 and not is_backbone_resin and cls != "epoxy_hardener":
+            ep_dils_all.append(a)
+        # If fn is unknown (0), still include if name strongly indicates glycidyl diluent and it's not a backbone resin
+        elif fn == 0 and ("glycidyl" in nm or "reactive diluent" in nm or "diluent" in nm) and (not is_backbone_resin) and cls != "epoxy_hardener":
+            ep_dils_all.append(a)
+
+    # Keep any explicitly tagged reactive diluents too
+    ep_dils_all = sorted(set(list_by_class("reactive_diluent") + ep_dils_all))
     mons = list_by_class("vinyl_monomer")
     solv = list_by_class("solvent_plasticizer")
     sil = list_by_class("silane")
