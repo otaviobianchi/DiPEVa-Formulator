@@ -2,6 +2,7 @@
 import re
 from pathlib import Path
 import math
+from typing import Optional, Callable
 
 import numpy as np
 import pandas as pd
@@ -144,7 +145,7 @@ def equiv_lookup(abbr: str) -> dict:
 # =========================
 _MW_RE = re.compile(r"(?:^|[^0-9])([0-9]{2,5})(?:$|[^0-9])")
 
-def estimate_OH_number_from_abbr(abbr: str) -> float | None:
+def estimate_OH_number_from_abbr(abbr: str) -> Optional[float]:
     """Best-effort OH number (mgKOH/g) estimator for polymeric polyols when the library lacks OH.
 
     Heuristic rules (transparent + editable in code):
@@ -524,7 +525,7 @@ def equiv_editor():
             df_edit["Abbrev"] = df_edit["Abbrev"].map(_norm_abbr)
         st.session_state["equiv_lib"] = df_edit
 
-def sync_from_library(selection_key: str, value_key_map: dict, enabled: bool, fallback: callable | None = None):
+def sync_from_library(selection_key: str, value_key_map: dict, enabled: bool, fallback: Optional[Callable] = None):
     if not enabled:
         return
     abbr = st.session_state.get(selection_key)
