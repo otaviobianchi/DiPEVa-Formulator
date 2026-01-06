@@ -1198,7 +1198,7 @@ with tab_figs:
         res_sel = st.multiselect("Resins", list_by_class("epoxy_resin"), default=_def(list_by_class("epoxy_resin"), 5), format_func=label)
         hard_sel = st.multiselect("Hardeners", list_by_class("epoxy_hardener"), default=_def(list_by_class("epoxy_hardener"), 10), format_func=label)
         fn_target = st.slider("Reactive diluents — epoxy functionality (figures)", 1, 4, 1, step=1, key="fig_ep_fn")
-        dils_all = sorted(set(list_by_class("reactive_diluent") + [a for a in T.index if (int(T.loc[a, "__epoxy_fn__"]) >= 1 and T.loc[a, "__class__"] != "epoxy_resin")]))
+        dils_all = sorted(set(list_by_class("reactive_diluent") + [a for a in T.index if (int(T.loc[a, "__epoxy_fn__"]) >= 1)]))
         dils = [a for a in dils_all if int(T.loc[a, "__epoxy_fn__"]) == int(fn_target)]
         if not dils:
             dils = [a for a in dils_all if int(T.loc[a, "__epoxy_fn__"]) >= 1]
