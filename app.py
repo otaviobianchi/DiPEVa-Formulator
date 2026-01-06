@@ -366,6 +366,19 @@ def estimate_EEW_from_db_or_mw(abbr: str) -> float:
 # =========================
 # CLASSIFICATION
 # =========================
+
+# =========================
+# PRECOMPUTE EPOXY FUNCTIONALITY (for reactive diluent detection)
+# =========================
+# Must be computed BEFORE classify_row() uses it.
+if "__epoxy_fn__" not in T.columns:
+    try:
+        T["__epoxy_fn__"] = [estimate_epoxy_function(a) for a in T.index]
+        T["__epoxy_fn__"] = pd.to_numeric(T["__epoxy_fn__"], errors="coerce").fillna(0).astype(int)
+    except Exception:
+        # Fail-safe: keep app running even if SMILES are missing/unparseable
+        T["__epoxy_fn__"] = 0
+
 def classify_row(abbr: str, row: pd.Series) -> str:
     name = _name_of(abbr).lower()
     a = str(abbr).lower()
