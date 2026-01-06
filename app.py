@@ -1,4 +1,4 @@
-       
+
 import re
 from pathlib import Path
 import math
@@ -138,6 +138,46 @@ def equiv_lookup(abbr: str) -> dict:
     if hit.empty:
         return {}
     return hit.iloc[0].to_dict()
+
+# =========================
+# FALLBACK ESTIMATORS (when equivalents are missing in library)
+# =========================
+_MW_RE = re.compile(r"(?:^|[^0-9])([0-9]{2,5})(?:$|[^0-9])")
+
+def estimate_OH_number_from_abbr(abbr: str) -> float | None:
+    """Best-effort OH number (mgKOH/g) estimator for polymeric polyols when the library lacks OH.
+
+    Heuristic rules (transparent + editable in code):
+    - If Abbrev encodes a nominal Mn (e.g., PEG200, PPG1000, PTMEG2000, PCL1000, PCDL1000), use that Mn.
+    - Functionality defaults to 2 (diol). If the name/abbr hints triol, use 3.
+    - OH# ≈ 56100 * f / Mn  (mgKOH/g), assuming all OH are primary and Mn in g/mol.
+
+    Returns None if Mn cannot be inferred.
+    """
+    if not abbr:
+        return None
+    a = str(abbr).upper().strip()
+
+    # common triol hints
+    triol_hints = ["TRIOL", "GLY", "GLYC", "TMP", "SOR", "PER", "GLYCER", "SORBIT", "PENTAERYTHR"]
+    f = 3 if any(h in a for h in triol_hints) else 2
+
+    # Try to infer Mn from typical polymeric polyol abbreviations
+    # Examples: PEG200, PEG1000, PPG400, PTMEG2000, PCL1000, PCDL1000
+    mm = None
+    m = re.search(r"(PEG|PPG|PTMEG|PCL|PCDL|PBD|PDMS)\s*([0-9]{2,5})", a)
+    if m:
+        mm = float(m.group(2))
+    else:
+        # fallback: any 2-5 digit number in abbr
+        m2 = _MW_RE.search(a)
+        if m2:
+            mm = float(m2.group(1))
+
+    if not mm or mm <= 0:
+        return None
+
+    return float(56100.0 * f / mm)
 
 # =========================
 # METRICS (article-consistent)
@@ -484,13 +524,19 @@ def equiv_editor():
             df_edit["Abbrev"] = df_edit["Abbrev"].map(_norm_abbr)
         st.session_state["equiv_lib"] = df_edit
 
-def sync_from_library(selection_key: str, value_key_map: dict, enabled: bool):
+def sync_from_library(selection_key: str, value_key_map: dict, enabled: bool, fallback: callable | None = None):
     if not enabled:
         return
     abbr = st.session_state.get(selection_key)
     if not abbr:
         return
     eq = equiv_lookup(abbr)
+    if not eq and fallback is not None:
+        # fallback may return a dict of equivalent-like values
+        try:
+            eq = fallback(abbr) or {}
+        except Exception:
+            eq = {}
     if not eq:
         return
     for col_name, state_key in value_key_map.items():
@@ -603,7 +649,7 @@ with tab_form:
 
         # auto-fill from library (will work because session_state stores Abbrev)
         sync_from_library("pu_iso", {"NCO_%": "pu_nco"}, lock)
-        sync_from_library("pu_pol", {"OH_mgKOH_g": "pu_oh_pol"}, lock)
+        sync_from_library("pu_pol", {"OH_mgKOH_g": "pu_oh_pol"}, lock, fallback=lambda ab: {"OH_mgKOH_g": estimate_OH_number_from_abbr(ab)})
         if use_ext and ext:
             sync_from_library("pu_ext", {"OH_mgKOH_g": "pu_oh_ext"}, lock)
         if use_xl and xl:
