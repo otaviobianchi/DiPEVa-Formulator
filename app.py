@@ -124,79 +124,154 @@ def label(_id: str) -> str:
 
 
 def classify_row(row: pd.Series) -> str:
-    ab = str(row["__abbr__"]).lower()
-    nm = _nm(row).lower()
+    """Heuristic family classifier.
+    Note: 'extender' is intended for *low-molecular-weight* multi-functional alcohols
+    (diols/triols) used as chain extenders/crosslinkers in PU formulations.
+    """
+    ab = str(row["__abbr__"]).strip().lower()
+    nm = str(row.get("__name__", "")).strip().lower()
 
+    # -----------------
+    # ISOCYANATES
+    # -----------------
     if (
-        "isocyan" in nm
-        or re.search(r"\bmdi\b|\btdi\b|\bhdi\b|\bipdi\b|\bpmdi\b|\bh12mdi\b|\bmdi-\b", ab)
-        or "nco" in nm
+        ("isocyan" in nm)
+        or ("nco" in nm)
+        or re.search(r"\b(mdi|tdi|hdi|ipdi|pmdi|h12mdi)\b", ab)
+        or re.search(r"\b(mdi|tdi|hdi|ipdi|pmdi|h12mdi)\b", nm)
     ):
         return "isocyanate"
 
+    # -----------------
+    # PU EXTENDERS / CROSSLINKERS (multi-functional alcohols, non-polymeric)
+    # -----------------
+    # Typical diols
+    diol_ab_pat = r"(?:\b(eg|meg|pg|mpg|npg|deg|teg|dpg|bdg|bdo|hdo|pdo|pe?do)\b|\b\d[,\.]\d\s*-?\s*(bdo|pdo|hdo|pe?do)\b)"
+    # Names / keywords for low-MW diols
+    diol_nm_keys = [
+        "ethylene glycol", "etileno glicol", "ethane-1,2-diol",
+        "propylene glycol", "propanediol", "propane-1,2-diol", "propane-1,3-diol",
+        "butanediol", "butane-1,4-diol", "butane-1,3-diol", "butane-2,3-diol",
+        "pentanediol", "hexanediol", "1,6-hexanediol", "1,5-pentanediol",
+        "neopentyl glycol", "npg",
+        "diethylene glycol", "triethylene glycol", "tetraethylene glycol",
+        "cyclohexanedimethanol", "chdm",
+    ]
+    # Triols / crosslinkers (keep separate class so UI can optionally include)
+    triol_ab_pat = r"\b(tmp|gly|glycerol|tea)\b"
+    triol_nm_keys = [
+        "glycerol", "glicerol",
+        "trimethylolpropane", "tmp",
+        "triethanolamine", "tea",
+        "triol",
+    ]
+
+    # extenders: diols (and optionally triols)
     if (
-        re.search(r"\b1,?3[-\s]?bdo\b|\b1,?4[-\s]?bdo\b|\b2,?3[-\s]?bdo\b", nm)
-        or re.search(r"\b(1,?3|1,?4|2,?3)[-\s]?bdo\b", ab)
-        or "butanediol" in nm
-        or ("hexanediol" in nm and "poly" not in nm)
-        or ("ethylene glycol" in nm) or (ab in {"EG","DEG","TEG","PG","DPG","NPG","MPG"})
+        ("diol" in nm and "poly" not in nm and "polyol" not in nm)
+        or ("glycol" in nm and "poly" not in nm)
+        or re.search(diol_ab_pat, ab)
+        or any(k in nm for k in diol_nm_keys)
+        or re.search(r"\b(1,6-hdo|1,6hdo|1,5-pedo|1,5pedo|1,4-bdo|1,4bdo|1,3-bdo|1,3bdo|2,3-bdo|2,3bdo)\b", nm)
     ):
         return "extender"
 
     if (
-        "polyol" in nm
-        or re.search(r"\bpeg\d+|\bppg\d+|\bptmeg\d*|\bpcl\d+|\bpcdl\d*|\bpcldiol|\bpcdiol", ab)
-        or "poly(ethylene glycol)" in nm
-        or "poly(propylene glycol)" in nm
+        re.search(triol_ab_pat, ab)
+        or any(k in nm for k in triol_nm_keys)
+        or ("trimethylol" in nm)
+    ):
+        return "crosslinker"
+
+    # -----------------
+    # POLYOLS (polymeric or higher functionality, incl. polyethers/polyesters)
+    # -----------------
+    if (
+        ("polyol" in nm)
+        or re.search(r"\b(peg\d+|ppg\d+|ptmeg\d+|pcl\d+|pcdl\d+|pcldiol|pcdl)\b", ab)
+        or ("polyethylene glycol" in nm)
+        or ("polypropylene glycol" in nm)
+        or ("polytetramethylene" in nm)
         or ("caprolactone" in nm and "diol" in nm)
-        or ("carbonate" in nm and "diol" in nm)
+        or ("polyether" in nm)
     ):
         return "polyol"
 
-    if "anhydride" in nm or "acid" in nm:
+    # -----------------
+    # POLYESTER ACIDS / ANHYDRIDES
+    # -----------------
+    if (
+        ("anhydride" in nm)
+        or ("acid" in nm)
+        or re.search(r"\b(mah|hhpa|mhhpa)\b", ab)
+        or re.search(r"\b(anhydride|acid)\b", nm)
+    ):
         return "acid_anhydride"
 
+    # -----------------
+    # EPOXY SYSTEMS
+    # -----------------
     if (
-        "epoxy resin" in nm
-        or "epoxy" in nm
-        or "glycidyl" in nm
-        or "cycloaliphatic" in nm
-        or "aliphatic epoxy" in nm
-        or re.search(r"\bdgeba\b|\bbdge\b|\berl\b|\bepox\b", ab)
+        ("epoxy" in nm)
+        or re.search(r"\b(dgeba|bdge|dgbf|tgddm|novolac)\b", ab)
+        or ("diglycidyl" in nm)
+        or ("glycidyl" in nm and "amine" not in nm)
     ):
-        if "amine" not in nm and "diamin" not in nm and "hardener" not in nm:
-            return "epoxy_resin"
+        return "epoxy_resin"
 
     if (
-        "amine" in nm or "diamin" in nm or "polyamine" in nm or "hardener" in nm
-        or re.search(r"\bddm\b|\bdds\b|\bdeta\b|\bteta\b|\bdicy\b|\bipda\b|\bpepa\b", ab)
+        ("amine" in nm)
+        or ("diamine" in nm)
+        or re.search(r"\b(deta|teta|ddm|dds|dicy|ipda|eda)\b", ab)
     ):
         return "epoxy_hardener"
 
+    # Reactive diluents (epoxy side)
     if (
-        "reactive diluent" in nm
-        or "glycidyl ether" in nm
-        or ("glycidyl" in nm and "resin" not in nm)
-        or "glyme" in nm
+        ("reactive diluent" in nm)
+        or ("glycidyl ether" in nm)
+        or ("benzyl alcohol" in nm)
+        or ("glyme" in nm)
         or ("ether" in nm and "poly" not in nm)
     ):
         return "reactive_diluent"
 
+    # -----------------
+    # VINYLICS
+    # -----------------
     if (
-        "styrene" in nm or "acrylonitrile" in nm or "methacrylate" in nm or "vinyl acetate" in nm
-        or re.search(r"\bmma\b|\bst\b|\ban\b|\bvinyl\b", ab)
+        ("styrene" in nm)
+        or ("acrylonitrile" in nm)
+        or ("methacrylate" in nm)
+        or ("vinyl acetate" in nm)
+        or re.search(r"\b(an|mma|st|fn|α-ms|a-ms)\b", ab)
     ):
         return "vinyl_monomer"
 
     if (
-        "alcohol" in nm or "phthalate" in nm or "benzoate" in nm or "adipate" in nm or "phosphate" in nm
+        ("phthalate" in nm)
+        or ("adipate" in nm)
+        or ("benzoate" in nm)
+        or ("phosphate" in nm)
+        or ("solvent" in nm)
+        or ("plasticizer" in nm)
+        or ("alcohol" in nm and "poly" not in nm)
     ):
         return "solvent_plasticizer"
 
-    if "silane" in nm or re.search(r"\bteos\b|\bvtms\b|\baptes\b|\bmptes\b", ab):
+    # -----------------
+    # SILANES
+    # -----------------
+    if (
+        ("silane" in nm)
+        or re.search(r"\b(teos|vtms|aptes|mptes|vinylsilane|vinyl silane)\b", ab)
+        or ("silane" in nm)
+    ):
         return "silane"
 
     return "other"
+
+
 
 
 T["__class__"] = [classify_row(T.loc[i]) for i in T.index]
@@ -368,7 +443,7 @@ with tab_form:
 
     isos = list_by_class("isocyanate")
     polyols = list_by_class("polyol")
-    extenders = list_by_class("extender")
+    extenders = list_by_class("extender") + list_by_class("crosslinker")
     ep_resins = list_by_class("epoxy_resin")
     ep_hards = list_by_class("epoxy_hardener")
     ep_dils  = list_by_class("reactive_diluent")
@@ -523,4 +598,3 @@ with tab_maps:
 with tab_figs:
     st.subheader("FIGURES")
     st.write("Use the v14 improved build for full heatmaps/figures module.")
-
