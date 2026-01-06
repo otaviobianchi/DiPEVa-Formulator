@@ -251,22 +251,44 @@ def _mw_of(abbr: str) -> float:
         return float("nan")
 
 # --- Epoxy function estimation (for reactive diluent filtering) ---
-_epoxide_patterns = [r"C1OC1", r"O1CC1", r"C1CO1"]
+# We intentionally avoid RDKit to keep deployment simple.
+# This is a *best-effort* estimator used only for UI filtering and fallback EEW.
+_EPOXY_HINT_RE = re.compile(r"epoxy|oxirane|glycidyl|epichlorohydrin|dige|dige|dge", re.I)
+
+def _count_epoxide_rings(smiles: str) -> int:
+    """Count oxirane rings in SMILES with conservative regex.
+
+    Handles common variants:
+      - C1OC1, C2OC2, ...
+      - C1CO1, C2CO2, ...
+      - O1CC1, O2CC2, ...
+    """
+    if not smiles:
+        return 0
+    s = smiles.replace(" ", "")
+    n = 0
+    # ring digit backreference (1..9) – good enough for typical monomer SMILES
+    n += len(re.findall(r"C(\d)OC\1", s))
+    n += len(re.findall(r"C(\d)CO\1", s))
+    n += len(re.findall(r"O(\d)CC\1", s))
+    # some tool exports may contain "OC1OC1" fragments
+    n += len(re.findall(r"OC(\d)OC\1", s))
+    return int(n)
+
 def estimate_epoxy_function(abbr: str) -> int:
     name = _name_of(abbr).lower()
     smi  = _smiles_of(abbr)
-    if ("epoxy" not in name) and ("oxirane" not in name) and ("glycid" not in name) and not re.search(r"\bdge", str(abbr).lower()):
-        # still may be epoxy but avoid inflating
-        if not re.search(r"glycidyl|oxirane|epichlorohydrin", name):
-            return 0
-    s = (smi or "").replace(" ", "")
-    n = 0
-    if s:
-        for pat in _epoxide_patterns:
-            n += len(re.findall(pat, s))
-        n += len(re.findall(r"OC1OC1", s))
-        if n > 0:
-            return int(n)
+    ab_l = str(abbr).lower()
+
+    # quick reject unless there is any epoxy hint in name/abbr
+    if (not _EPOXY_HINT_RE.search(name)) and (not re.search(r"\bdge", ab_l)):
+        return 0
+
+    n = _count_epoxide_rings(smi or "")
+    if n > 0:
+        return int(n)
+
+    # fallback by name keywords (common naming conventions)
     if "diglycidyl" in name:
         return 2
     if "triglycidyl" in name:
@@ -275,8 +297,11 @@ def estimate_epoxy_function(abbr: str) -> int:
         return 4
     if "glycidyl" in name:
         return 1
-    if re.search(r"\bdgeba\b|\bdgebf\b|\bdgef\b", str(abbr).lower()):
+
+    # typical diepoxy backbones
+    if re.search(r"\bdgeba\b|\bdgebf\b|\bdgef\b", ab_l):
         return 2
+
     return 0
 
 T["__epoxy_fn__"] = [estimate_epoxy_function(i) for i in T.index]
@@ -566,11 +591,20 @@ with tab_form:
     crosslinkers = list_by_class("crosslinker")
 
     # Epoxy pools
-    ep_resins = list_by_class("epoxy_resin")
-    ep_hards  = list_by_class("epoxy_hardener")
+    # Epoxy pools (aligned to the article):
+    # - "Resins": any molecule with estimated epoxy function >= 2 (plus any explicitly classified resins)
+    # - "Reactive diluents": any molecule with estimated epoxy function == 1 (plus any explicitly classified diluents)
+    # This ensures that mono-functional glycidyl ethers/esters are not missed even if the DB lacks an explicit role.
+    ep_hards = list_by_class("epoxy_hardener")
+
+    ep_resins = sorted(set(
+        list_by_class("epoxy_resin")
+        + [a for a in T.index if int(T.loc[a, "__epoxy_fn__"]) >= 2]
+    ))
+
     ep_dils_all = sorted(set(
         list_by_class("reactive_diluent")
-        + [a for a in T.index if (int(T.loc[a, "__epoxy_fn__"]) >= 1 and T.loc[a, "__class__"] != "epoxy_resin")]
+        + [a for a in T.index if int(T.loc[a, "__epoxy_fn__"]) == 1]
     ))
 
     # Enrich lists using equivalents library roles (editable)
@@ -881,11 +915,18 @@ with tab_maps:
     extenders = list_by_class("extender")
     crosslinkers = list_by_class("crosslinker")
 
-    ep_resins = list_by_class("epoxy_resin")
-    ep_hards  = list_by_class("epoxy_hardener")
+    # Epoxy pools (aligned to the manuscript logic):
+    # - "Resins": any compound with estimated epoxy functionality >=2
+    # - "Reactive diluents": any compound with estimated epoxy functionality ==1
+    # Additionally, keep compatibility with legacy class labels.
+    ep_hards = list_by_class("epoxy_hardener")
+    ep_resins = sorted(set(
+        list_by_class("epoxy_resin")
+        + [a for a in T.index if int(T.loc[a, "__epoxy_fn__"]) >= 2]
+    ))
     ep_dils_all = sorted(set(
         list_by_class("reactive_diluent")
-        + [a for a in T.index if (int(T.loc[a, "__epoxy_fn__"]) >= 1 and T.loc[a, "__class__"] != "epoxy_resin")]
+        + [a for a in T.index if int(T.loc[a, "__epoxy_fn__"]) == 1]
     ))
     mons = list_by_class("vinyl_monomer")
     solv = list_by_class("solvent_plasticizer")
