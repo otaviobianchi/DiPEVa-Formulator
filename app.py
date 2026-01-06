@@ -686,15 +686,51 @@ with tab_form:
 with tab_maps:
     st.subheader("Heatmaps (grouped by purpose)")
 
-    purpose = st.selectbox("Purpose", ["Polyesters", "Polyurethanes", "Epoxies", "Vinyls", "Silanes"], key="hm_purpose")
+    # Metric selector (matches the manuscript descriptors)
+    metric = st.radio("Heatmap metric", ["Ra", "Δδa", "Π"], horizontal=True, key="hm_metric")
+
+    def _hm_labels(m):
+        if m == "Ra":
+            return "Ra (MPa$^{1/2}$)", "Ra"
+        if m == "Δδa":
+            return "Δδa (MPa$^{1/2}$)", "Δδa"
+        return "Π (dimensionless)", "Π"
+
+    hm_cbar, hm_tag = _hm_labels(metric)
+
+
+    purpose = st.selectbox(
+        "Purpose",
+        ["Polyesters", "Polyurethanes", "Epoxies", "Vinyls", "Silanes"],
+        key="hm_purpose",
+    )
+
+    # Default behavior: show the FULL lists (so you don't lose acids/anhydrides/diols)
+    use_all_defaults = st.checkbox(
+        "Use full lists by default (recommended)",
+        value=True,
+        help="If disabled, the app preselects only the first items to keep figures small.",
+        key="hm_use_all_defaults",
+    )
 
     acids = list_by_class("acid_anhydride")
     isos = list_by_class("isocyanate")
     polyols = list_by_class("polyol")
-    extenders = [e for e in extenders if e in T.index]
+    extenders = list_by_class("extender")
+    crosslinkers = list_by_class("crosslinker") if "crosslinker" in set(T["__class__"]) else []
+    ep_resins = list_by_class("epoxy_resin")
+    ep_hards = list_by_class("epoxy_hardener")
+    ep_dils  = list_by_class("reactive_diluent")
     mons = list_by_class("vinyl_monomer")
     solv = list_by_class("solvent_plasticizer")
     sil = list_by_class("silane")
+
+    # Normalization constants for Π (computed from the loaded database)
+    da_max_hm = float(np.nanmax(T[COL["da"]])) if (COL.get("da") and COL["da"] in T.columns) else 1.0
+    ds_max_hm = float(np.nanmax(T[COL["sig"]])) if (COL.get("sig") and COL["sig"] in T.columns) else 1.0
+
+    def _default(opts, n=12):
+        return opts if use_all_defaults else opts[:min(n, len(opts))]
 
     def build_matrix(rows, cols):
         mat = pd.DataFrame(index=rows, columns=cols, dtype=float)
@@ -702,67 +738,177 @@ with tab_maps:
             a = T.loc[r]
             for c in cols:
                 b = T.loc[c]
-                mat.loc[r, c] = Ra(a, b)
+                da = delta_a(a, b)
+                ds = delta_sigmaL(a, b)
+                if metric == "Ra":
+                    mat.loc[r, c] = Ra(a, b)
+                elif metric == "Δδa":
+                    mat.loc[r, c] = da
+                else:  # Π
+                    mat.loc[r, c] = Pi(da, ds, da_max_hm, ds_max_hm)
         return mat
 
+    cbar_label = (
+        "Ra (MPa$^{1/2}$)" if metric == "Ra" else
+        "Δδa (MPa$^{1/2}$)" if metric == "Δδa" else
+        "Π (dimensionless)"
+    )
+
     if purpose == "Polyesters":
-        st.caption("Acids/anhydrides × polyols (Ra).")
-        left = st.multiselect("Polyols (rows)", polyols, default=polyols[:12], format_func=label)
-        right = st.multiselect("Acids/anhydrides (cols)", acids, default=acids[:12], format_func=label)
+        st.caption("Acids/anhydrides × polyols (heatmap).")
+        left = st.multiselect(
+            "Polyols (rows)",
+            polyols,
+            default=_default(polyols, 18),
+            format_func=label,
+            key="hm_polyesters_rows",
+        )
+        right = st.multiselect(
+            "Acids/anhydrides (cols)",
+            acids,
+            default=_default(acids, 18),
+            format_func=label,
+            key="hm_polyesters_cols",
+        )
         if left and right:
             mat = build_matrix(left, right)
-            st.pyplot(plot_heatmap(mat, "POLYESTERS — Polyols × Acids/Anhydrides (Ra)", "Ra (MPa$^{1/2}$)"))
+            fig = plot_heatmap(mat, f"POLYESTERS — Polyols × Acids/Anhydrides ({metric})", cbar_label)
+            st.pyplot(fig)
 
     elif purpose == "Polyurethanes":
-        st.caption("Isocyanates × polyols and alcohols (Ra).")
-        c1, c2 = st.columns(2)
-        with c1:
-            isos_sel = st.multiselect("Isocyanates (cols)", isos, default=isos[:10], format_func=label)
-        with c2:
-            include_alcohols = st.checkbox("Include extenders & crosslinkers (rows)", value=True, key="hm_pu_alc")
+        st.caption("Isocyanates × polyols/extenders/crosslinkers (heatmap).")
+        isos_sel = st.multiselect(
+            "Isocyanates (cols)",
+            isos,
+            default=_default(isos, 10),
+            format_func=label,
+            key="hm_pu_isos",
+        )
 
-        pol_sel = st.multiselect("Polyols (rows)", polyols, default=polyols[:12], format_func=label)
+        show_ext = st.checkbox("Include extenders", value=True, key="hm_pu_show_ext")
+        show_xl  = st.checkbox("Include crosslinkers/triols", value=False, key="hm_pu_show_xl")
+
+        pol_sel = st.multiselect(
+            "Polyols (rows)",
+            polyols,
+            default=_default(polyols, 18),
+            format_func=label,
+            key="hm_pu_polyols",
+        )
         if pol_sel and isos_sel:
-            st.pyplot(plot_heatmap(build_matrix(pol_sel, isos_sel), "PU — Polyols × Isocyanates (Ra)", "Ra (MPa$^{1/2}$)"))
+            mat = build_matrix(pol_sel, isos_sel)
+            fig = plot_heatmap(mat, f"PU — Polyols × Isocyanates ({metric})", cbar_label)
+            st.pyplot(fig)
 
-        if include_alcohols:
-            alc = sorted(set(extenders + crosslinkers))
-            alc = [a for a in alc if a in T.index]
-            alc_sel = st.multiselect("Alcohols (rows) — extenders + crosslinkers", alc, default=alc[:10], format_func=label)
-            if alc_sel and isos_sel:
-                st.pyplot(plot_heatmap(build_matrix(alc_sel, isos_sel), "PU — Alcohols × Isocyanates (Ra)", "Ra (MPa$^{1/2}$)"))
+        if show_ext:
+            ext_sel = st.multiselect(
+                "Extenders (rows)",
+                extenders,
+                default=_default(extenders, 18),
+                format_func=label,
+                key="hm_pu_extenders",
+            )
+            if ext_sel and isos_sel:
+                mat2 = build_matrix(ext_sel, isos_sel)
+                fig2 = plot_heatmap(mat2, f"PU — Extenders × Isocyanates ({metric})", cbar_label)
+                st.pyplot(fig2)
+
+        if show_xl and crosslinkers:
+            xl_sel = st.multiselect(
+                "Crosslinkers/triols (rows)",
+                crosslinkers,
+                default=_default(crosslinkers, 12),
+                format_func=label,
+                key="hm_pu_crosslinkers",
+            )
+            if xl_sel and isos_sel:
+                mat3 = build_matrix(xl_sel, isos_sel)
+                fig3 = plot_heatmap(mat3, f"PU — Crosslinkers/triols × Isocyanates ({metric})", cbar_label)
+                st.pyplot(fig3)
 
     elif purpose == "Epoxies":
-        st.caption("Epoxy resins × hardeners and reactive diluents (Ra).")
-        res_sel = st.multiselect("Resins (cols)", ep_resins, default=ep_resins[:6], format_func=label)
-        hard_sel = st.multiselect("Hardeners (rows)", ep_hards, default=ep_hards[:10], format_func=label)
+        st.caption("Epoxy resins × hardeners and reactive diluents (heatmap).")
+        res_sel = st.multiselect(
+            "Resins (cols)",
+            ep_resins,
+            default=_default(ep_resins, 12),
+            format_func=label,
+            key="hm_ep_resins",
+        )
+        hard_sel = st.multiselect(
+            "Hardeners (rows)",
+            ep_hards,
+            default=_default(ep_hards, 18),
+            format_func=label,
+            key="hm_ep_hards",
+        )
         if hard_sel and res_sel:
-            st.pyplot(plot_heatmap(build_matrix(hard_sel, res_sel), "EPOXY — Hardeners × Resins (Ra)", "Ra (MPa$^{1/2}$)"))
+            mat = build_matrix(hard_sel, res_sel)
+            fig = plot_heatmap(mat, f"EPOXY — Hardeners × Resins ({metric})", cbar_label)
+            st.pyplot(fig)
 
-        dil_sel = st.multiselect("Reactive diluents (rows)", ep_dils, default=ep_dils[:10], format_func=label)
+        dil_sel = st.multiselect(
+            "Reactive diluents (rows)",
+            ep_dils,
+            default=_default(ep_dils, 18),
+            format_func=label,
+            key="hm_ep_dils",
+        )
         if dil_sel and res_sel:
-            st.pyplot(plot_heatmap(build_matrix(dil_sel, res_sel), "EPOXY — Reactive diluents × Resins (Ra)", "Ra (MPa$^{1/2}$)"))
+            mat2 = build_matrix(dil_sel, res_sel)
+            fig2 = plot_heatmap(mat2, f"EPOXY — Reactive diluents × Resins ({metric})", cbar_label)
+            st.pyplot(fig2)
 
     elif purpose == "Vinyls":
-        st.caption("Vinyl monomers × solvents/plasticizers (Ra).")
-        mon_sel = st.multiselect("Monomers (rows)", mons, default=mons[:10], format_func=label)
-        sol_sel = st.multiselect("Solvents/plasticizers (cols)", solv, default=solv[:12], format_func=label)
+        st.caption("Vinyl monomers × solvents/plasticizers (heatmap).")
+        mon_sel = st.multiselect(
+            "Monomers (rows)",
+            mons,
+            default=_default(mons, 18),
+            format_func=label,
+            key="hm_vinyl_mons",
+        )
+        sol_sel = st.multiselect(
+            "Solvents/plasticizers (cols)",
+            solv,
+            default=_default(solv, 18),
+            format_func=label,
+            key="hm_vinyl_solv",
+        )
         if mon_sel and sol_sel:
-            st.pyplot(plot_heatmap(build_matrix(mon_sel, sol_sel), "VINYLS — Monomers × Solvents/Plasticizers (Ra)", "Ra (MPa$^{1/2}$)"))
+            mat = build_matrix(mon_sel, sol_sel)
+            fig = plot_heatmap(mat, f"VINYLS — Monomers × Solvents/Plasticizers ({metric})", cbar_label)
+            st.pyplot(fig)
 
     else:
-        st.caption("Silanes × selected targets (Ra).")
-        sil_sel = st.multiselect("Silanes (rows)", sil, default=sil[:10], format_func=label)
+        st.caption("Silane coupling agents × selected targets (heatmap).")
+        sil_sel = st.multiselect(
+            "Silanes (rows)",
+            sil,
+            default=_default(sil, 18),
+            format_func=label,
+            key="hm_silanes",
+        )
+
+        # Targets: alcohols/water (by name) + vinyl monomers + selected polyols
         target_pool = []
         for ab in T.index:
             nm = _name_of(ab).lower()
-            if "water" in nm or "alcohol" in nm:
+            if ("water" in nm) or ("alcohol" in nm) or ("ethanol" in nm) or ("methanol" in nm) or ("propan" in nm):
                 target_pool.append(ab)
-        target_pool = sorted(set(target_pool + mons[:10] + polyols[:10]))
-        tar_sel = st.multiselect("Targets (cols)", target_pool, default=target_pool[:12], format_func=label)
-        if sil_sel and tar_sel:
-            st.pyplot(plot_heatmap(build_matrix(sil_sel, tar_sel), "SILANES — Silanes × Targets (Ra)", "Ra (MPa$^{1/2}$)"))
+        target_pool = sorted(set(target_pool + mons + polyols))
 
+        tar_sel = st.multiselect(
+            "Targets (cols)",
+            target_pool,
+            default=_default(target_pool, 18),
+            format_func=label,
+            key="hm_sil_targets",
+        )
+        if sil_sel and tar_sel:
+            mat = build_matrix(sil_sel, tar_sel)
+            fig = plot_heatmap(mat, f"SILANES — Silanes × Targets ({metric})", cbar_label)
+            st.pyplot(fig)
 # -------------------------
 # FIGURES
 # -------------------------
@@ -771,6 +917,11 @@ with tab_figs:
     st.caption("Axes follow the manuscript: **Ra** on x-axis; **Δδa** or **Π** on y-axis.")
 
     fam = st.selectbox("Family", ["Polyesters", "Polyurethanes", "Epoxies", "Vinyls", "Silanes"], key="fig_family")
+
+    use_all_fig = st.checkbox("Use full lists (may be slower)", value=True, key="fig_all")
+    def _def(opts, n):
+        return opts if use_all_fig else opts[:n]
+
 
     da_max = float(np.nanmax(T[COL["da"]])) if (COL.get("da") and COL["da"] in T.columns) else 1.0
     ds_max = float(np.nanmax(T[COL["sig"]])) if (COL.get("sig") and COL["sig"] in T.columns) else 1.0
@@ -791,36 +942,36 @@ with tab_figs:
         return pd.DataFrame(rows)
 
     if fam == "Polyesters":
-        A = st.multiselect("Polyols", list_by_class("polyol"), default=list_by_class("polyol")[:10], format_func=label)
-        B = st.multiselect("Acids/anhydrides", list_by_class("acid_anhydride"), default=list_by_class("acid_anhydride")[:10], format_func=label)
+        A = st.multiselect("Polyols", list_by_class("polyol"), default=_def(list_by_class("polyol"), 10), format_func=label)
+        B = st.multiselect("Acids/anhydrides", list_by_class("acid_anhydride"), default=_def(list_by_class("acid_anhydride"), 10), format_func=label)
         dfp = make_pairs(A, B, tagA="polyol", tagB="acid")
     elif fam == "Polyurethanes":
-        iso_sel = st.multiselect("Isocyanates", list_by_class("isocyanate"), default=list_by_class("isocyanate")[:8], format_func=label)
-        pol_sel = st.multiselect("Polyols", list_by_class("polyol"), default=list_by_class("polyol")[:10], format_func=label)
-        alc_sel = st.multiselect("Alcohols (extenders + crosslinkers)", sorted(set(extenders + crosslinkers)), default=(extenders + crosslinkers)[:10], format_func=label)
+        iso_sel = st.multiselect("Isocyanates", list_by_class("isocyanate"), default=_def(list_by_class("isocyanate"), 8), format_func=label)
+        pol_sel = st.multiselect("Polyols", list_by_class("polyol"), default=_def(list_by_class("polyol"), 10), format_func=label)
+        alc_sel = st.multiselect("Alcohols (extenders + crosslinkers)", sorted(set(extenders + crosslinkers)), default=_def(extenders + crosslinkers, 10), format_func=label)
         df1 = make_pairs(pol_sel, iso_sel, tagA="polyol", tagB="iso")
         df2 = make_pairs([a for a in alc_sel if a in T.index], iso_sel, tagA="alc", tagB="iso")
         dfp = pd.concat([df1, df2], ignore_index=True) if (not df1.empty or not df2.empty) else pd.DataFrame()
     elif fam == "Epoxies":
-        res_sel = st.multiselect("Resins", ep_resins, default=ep_resins[:5], format_func=label)
-        hard_sel = st.multiselect("Hardeners", ep_hards, default=ep_hards[:10], format_func=label)
-        dil_sel = st.multiselect("Reactive diluents", ep_dils, default=ep_dils[:8], format_func=label)
+        res_sel = st.multiselect("Resins", ep_resins, default=_def(ep_resins, 5), format_func=label)
+        hard_sel = st.multiselect("Hardeners", ep_hards, default=_def(ep_hards, 10), format_func=label)
+        dil_sel = st.multiselect("Reactive diluents", ep_dils, default=_def(ep_dils, 8), format_func=label)
         df1 = make_pairs(hard_sel, res_sel, tagA="hard", tagB="resin")
         df2 = make_pairs(dil_sel, res_sel, tagA="dil", tagB="resin")
         dfp = pd.concat([df1, df2], ignore_index=True) if (not df1.empty or not df2.empty) else pd.DataFrame()
     elif fam == "Vinyls":
-        mon_sel = st.multiselect("Monomers", list_by_class("vinyl_monomer"), default=list_by_class("vinyl_monomer")[:10], format_func=label)
-        sol_sel = st.multiselect("Solvents/plasticizers", list_by_class("solvent_plasticizer"), default=list_by_class("solvent_plasticizer")[:12], format_func=label)
+        mon_sel = st.multiselect("Monomers", list_by_class("vinyl_monomer"), default=_def(list_by_class("vinyl_monomer"), 10), format_func=label)
+        sol_sel = st.multiselect("Solvents/plasticizers", list_by_class("solvent_plasticizer"), default=_def(list_by_class("solvent_plasticizer"), 12), format_func=label)
         dfp = make_pairs(mon_sel, sol_sel, tagA="mon", tagB="solv")
     else:
-        sil_sel = st.multiselect("Silanes", list_by_class("silane"), default=list_by_class("silane")[:10], format_func=label)
+        sil_sel = st.multiselect("Silanes", list_by_class("silane"), default=_def(list_by_class("silane"), 10), format_func=label)
         target_pool = []
         for ab in T.index:
             nm = _name_of(ab).lower()
             if "water" in nm or "alcohol" in nm:
                 target_pool.append(ab)
-        target_pool = sorted(set(target_pool + list_by_class("vinyl_monomer")[:10] + list_by_class("polyol")[:10]))
-        tar_sel = st.multiselect("Targets", target_pool, default=target_pool[:12], format_func=label)
+        target_pool = sorted(set(target_pool + _def(list_by_class("vinyl_monomer"), 10) + _def(list_by_class("polyol"), 10)))
+        tar_sel = st.multiselect("Targets", target_pool, default=_def(target_pool, 12), format_func=label)
         dfp = make_pairs(sil_sel, tar_sel, tagA="sil", tagB="target")
 
     if dfp.empty:
