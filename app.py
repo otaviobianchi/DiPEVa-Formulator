@@ -1,3 +1,4 @@
+       
 import re
 from pathlib import Path
 import math
@@ -44,6 +45,7 @@ COL["name"]   = _find_col(["Molecule", "Molecule name", "Name"])
 COL["abbr"]   = _find_col(["Abbrev", "Abbreviation", "abbr"])
 COL["cas"]    = _find_col(["CAS", "CASRN"])
 COL["smiles"] = _find_col(["SMILES/BigSMILES", "SMILES", "BigSMILES"])
+COL["mw"]     = _find_col(["MW", "Molecular weight", "MolWt", "Molar mass"])
 COL["dD"]     = _find_col(["δD (MPa1/2)", "deltaD", "dD", "δD"])
 COL["dP"]     = _find_col(["δP (MPa1/2)", "deltaP", "dP", "δP"])
 COL["dH"]     = _find_col(["δH (MPa1/2)", "deltaH", "dH", "δH"])
@@ -72,7 +74,7 @@ T["__abbr__"] = T["__abbr__"].str.upper()
 T = T.drop_duplicates(subset="__abbr__", keep="first").set_index("__abbr__", drop=True)
 
 # numeric coercion
-for k in ["dD", "dP", "dH", "sig", "da"]:
+for k in ["dD", "dP", "dH", "sig", "da", "mw"]:
     c = COL.get(k)
     if c and c in T.columns:
         T[c] = pd.to_numeric(T[c], errors="coerce")
@@ -88,7 +90,7 @@ DEFAULT_EQUIV = [
     {"Abbrev": "HDI", "Role": "Isocyanate", "NCO_%": 50.0, "OH_mgKOH_g": None, "EEW_g_eq": None, "AHEW_g_eq": None},
     {"Abbrev": "IPDI", "Role": "Isocyanate", "NCO_%": 37.8, "OH_mgKOH_g": None, "EEW_g_eq": None, "AHEW_g_eq": None},
     {"Abbrev": "H12MDI", "Role": "Isocyanate", "NCO_%": 32.0, "OH_mgKOH_g": None, "EEW_g_eq": None, "AHEW_g_eq": None},
-    {"Abbrev": "POLYMERIC MDI", "Role": "Isocyanate", "NCO_%": 31.5, "OH_mgKOH_g": None, "EEW_g_eq": None, "AHEW_g_eq": None},
+    {"Abbrev": "Polymeric MDI", "Role": "Isocyanate", "NCO_%": 31.5, "OH_mgKOH_g": None, "EEW_g_eq": None, "AHEW_g_eq": None},
 
     # Difunctional alcohols (Extenders) - include common glycols/diols
     {"Abbrev": "EG", "Role": "Extender", "NCO_%": None, "OH_mgKOH_g": 1806.0, "EEW_g_eq": None, "AHEW_g_eq": None},
@@ -101,7 +103,7 @@ DEFAULT_EQUIV = [
     {"Abbrev": "MPG", "Role": "Extender", "NCO_%": None, "OH_mgKOH_g": 1475.0, "EEW_g_eq": None, "AHEW_g_eq": None},
     {"Abbrev": "NPG", "Role": "Extender", "NCO_%": None, "OH_mgKOH_g": 1197.0, "EEW_g_eq": None, "AHEW_g_eq": None},
 
-    # Triols / Crosslinkers (block separate)
+    # Triols / Crosslinkers
     {"Abbrev": "GLY", "Role": "Crosslinker/triol", "NCO_%": None, "OH_mgKOH_g": 1828.0, "EEW_g_eq": None, "AHEW_g_eq": None},
     {"Abbrev": "TMP", "Role": "Crosslinker/triol", "NCO_%": None, "OH_mgKOH_g": 1253.0, "EEW_g_eq": None, "AHEW_g_eq": None},
     {"Abbrev": "SOR", "Role": "Crosslinker/triol", "NCO_%": None, "OH_mgKOH_g": 1217.0, "EEW_g_eq": None, "AHEW_g_eq": None},
@@ -109,7 +111,7 @@ DEFAULT_EQUIV = [
 
     # Epoxy resins / hardeners (EEW/AHEW)
     {"Abbrev": "DGEBA", "Role": "Epoxy resin", "NCO_%": None, "OH_mgKOH_g": None, "EEW_g_eq": 185.0, "AHEW_g_eq": None},
-    {"Abbrev": "BDGE",  "Role": "Epoxy resin", "NCO_%": None, "OH_mgKOH_g": None, "EEW_g_eq": 185.0, "AHEW_g_eq": None},
+    {"Abbrev": "BDGE",  "Role": "Reactive diluent", "NCO_%": None, "OH_mgKOH_g": None, "EEW_g_eq": 92.0, "AHEW_g_eq": None},
     {"Abbrev": "DDM",   "Role": "Hardener",  "NCO_%": None, "OH_mgKOH_g": None, "EEW_g_eq": None, "AHEW_g_eq": 30.0},
     {"Abbrev": "DDS",   "Role": "Hardener",  "NCO_%": None, "OH_mgKOH_g": None, "EEW_g_eq": None, "AHEW_g_eq": 62.0},
     {"Abbrev": "DICY",  "Role": "Hardener",  "NCO_%": None, "OH_mgKOH_g": None, "EEW_g_eq": None, "AHEW_g_eq": 42.0},
@@ -125,8 +127,6 @@ def get_equiv_df() -> pd.DataFrame:
     df = st.session_state["equiv_lib"].copy()
     if "Abbrev" in df.columns:
         df["Abbrev"] = df["Abbrev"].map(_norm_abbr)
-    if "Role" in df.columns:
-        df["Role"] = df["Role"].astype(str).str.strip()
     return df
 
 def equiv_lookup(abbr: str) -> dict:
@@ -162,7 +162,6 @@ def delta_sigmaL(a: pd.Series, b: pd.Series) -> float:
     return float(abs(a[c] - b[c]))
 
 def Pi(da: float, ds: float, da_max: float, ds_max: float) -> float:
-    # Article: no wa/ws weights: Π = Δδa/δa,max + ΔσL/σL,max
     nda = da/(da_max + 1e-12)
     if np.isfinite(ds):
         nds = ds/(ds_max + 1e-12)
@@ -170,7 +169,6 @@ def Pi(da: float, ds: float, da_max: float, ds_max: float) -> float:
     return float(nda)
 
 def score_percent(ra: float, da: float, pi: float, ra_max: float, da_max: float, pi_max: float) -> float:
-    # Higher is better (0..100): 1 - mean(normalized penalties)
     n_ra = ra/(ra_max + 1e-12)
     n_da = da/(da_max + 1e-12)
     n_pi = pi/(pi_max + 1e-12)
@@ -178,21 +176,13 @@ def score_percent(ra: float, da: float, pi: float, ra_max: float, da_max: float,
     return float(np.clip(s, 0, 100))
 
 # =========================
-# LABELS / CLASSIFICATION
+# LABELS / HELPERS
 # =========================
 def _name_of(abbr: str) -> str:
     if COL["name"] and COL["name"] in T.columns:
         v = T.loc[abbr, COL["name"]]
         return str(v) if not pd.isna(v) else abbr
     return abbr
-
-def _smiles_of(abbr: str) -> str:
-    if COL.get("smiles") and COL["smiles"] in T.columns:
-        v = T.loc[abbr, COL["smiles"]]
-        if pd.isna(v):
-            return ""
-        return str(v).strip()
-    return ""
 
 def label(abbr: str) -> str:
     nm = _name_of(abbr)
@@ -202,76 +192,158 @@ def label(abbr: str) -> str:
         return base
     return f"{base} — {nm_s}"
 
+def _smiles_of(abbr: str) -> str:
+    c = COL.get("smiles")
+    if not c or c not in T.columns:
+        return ""
+    v = T.loc[abbr, c]
+    return "" if pd.isna(v) else str(v)
+
+def _mw_of(abbr: str) -> float:
+    c = COL.get("mw")
+    if not c or c not in T.columns:
+        return float("nan")
+    v = T.loc[abbr, c]
+    try:
+        return float(v)
+    except Exception:
+        return float("nan")
+
+# --- Epoxy function estimation (for reactive diluent filtering) ---
+_epoxide_patterns = [r"C1OC1", r"O1CC1", r"C1CO1"]
+def estimate_epoxy_function(abbr: str) -> int:
+    name = _name_of(abbr).lower()
+    smi  = _smiles_of(abbr)
+    if ("epoxy" not in name) and ("oxirane" not in name) and ("glycid" not in name) and not re.search(r"\bdge", str(abbr).lower()):
+        # still may be epoxy but avoid inflating
+        if not re.search(r"glycidyl|oxirane|epichlorohydrin", name):
+            return 0
+    s = (smi or "").replace(" ", "")
+    n = 0
+    if s:
+        for pat in _epoxide_patterns:
+            n += len(re.findall(pat, s))
+        n += len(re.findall(r"OC1OC1", s))
+        if n > 0:
+            return int(n)
+    if "diglycidyl" in name:
+        return 2
+    if "triglycidyl" in name:
+        return 3
+    if "tetraglycidyl" in name:
+        return 4
+    if "glycidyl" in name:
+        return 1
+    if re.search(r"\bdgeba\b|\bdgebf\b|\bdgef\b", str(abbr).lower()):
+        return 2
+    return 0
+
+T["__epoxy_fn__"] = [estimate_epoxy_function(i) for i in T.index]
+
+def estimate_EEW_from_db_or_mw(abbr: str) -> float:
+    eq = equiv_lookup(abbr)
+    if eq and (eq.get("EEW_g_eq") is not None) and (not (isinstance(eq.get("EEW_g_eq"), float) and np.isnan(eq.get("EEW_g_eq")))):
+        return float(eq["EEW_g_eq"])
+    eew_col = None
+    for c in T.columns:
+        if "eew" in str(c).lower():
+            eew_col = c
+            break
+    if eew_col:
+        v = T.loc[abbr, eew_col]
+        try:
+            if not pd.isna(v):
+                return float(v)
+        except Exception:
+            pass
+    mw = _mw_of(abbr)
+    fn = int(T.loc[abbr, "__epoxy_fn__"])
+    if np.isfinite(mw) and fn > 0:
+        return float(mw / fn)
+    return float("nan")
+
+# =========================
+# CLASSIFICATION
+# =========================
 def classify_row(abbr: str, row: pd.Series) -> str:
-    """Heuristic classification for UI grouping (heatmaps/formulator).
-    The editable equivalents library can override roles via explicit filtering later.
-    """
     name = _name_of(abbr).lower()
     a = str(abbr).lower()
 
-    # PU: isocyanates
+    # PU family
     if (
         "isocyanate" in name
         or re.search(r"\bmdi\b|\btdi\b|\bhdi\b|\bipdi\b|\bpmdi\b|\bh12mdi\b", a)
         or re.search(r"\bmdi\b|\btdi\b|\bhdi\b|\bipdi\b|\bpmdi\b|\bh12mdi\b", name)
-        or "nco" in name
     ):
         return "isocyanate"
 
-    # Triols / multifunctional alcohols
+    # Triols
     if (
         "triol" in name
         or "glycer" in name
+        or "trimethylol" in name
         or "sorbit" in name
         or "pentaerythrit" in name
         or re.search(r"\btmp\b|\bgly\b|\bper\b|\bsor\b", a)
     ):
         return "crosslinker"
 
-    # Extenders (diols / glycols)
+    # Chain extenders (diols)
     if (
         "butanediol" in name
         or "hexanediol" in name
         or "propanediol" in name
+        or "ethylene glycol" in name
+        or "diethylene glycol" in name
+        or "triethylene glycol" in name
         or re.search(r"\beg\b|\bdeg\b|\bteg\b", a)
-        or re.search(r"\b1,?3-?bdo\b|\b1,?4-?bdo\b|\b2,?3-?bdo\b|\b1,?6-?hdo\b|\bhexd?anediol\b", a)
+        or re.search(r"\b1,?3-?bdo\b|\b1,?4-?bdo\b|\b2,?3-?bdo\b|\b1,?5-?pedo\b|\b1,?6-?hdo\b", a)
         or re.search(r"\bmpg\b|\bpg\b|\bdpg\b|\bnpg\b", a)
     ):
         return "extender"
 
-    # Polyols (oligomeric / polymeric diols)
+    # Polyols
     if (
         "polyol" in name
         or "polyether" in name
         or "polyester" in name
         or "polycarbonate" in name
-        or "diol" in name
+        or ("diol" in name and "butanediol" not in name and "hexanediol" not in name and "propanediol" not in name)
         or re.search(r"\bpeg\d+|\bppg\d+|\bptmeg\d*|\bpcl\d+|\bpcdl\d+|\bpbd\d*", a)
     ):
         return "polyol"
 
-    # Polyester acids / anhydrides (include diacids)
-    acid_abbr = {"AA","SA","PA","GA","MA","LA","OA","FA","IPA","TPA","SUA","SEA","MAH","HHPA","MHHPA"}
+    # Polyester acids/anhydrides
+    acid_abbr = {"aa","sa","pa","ga","ma","la","oa","fa","ipa","tpa","sua","sea","mah","hhpa","mhhpa"}
     if (
         "acid" in name
         or "diacid" in name
         or "dicarbox" in name
         or "anhydride" in name
-        or abbr.upper() in acid_abbr
+        or a in acid_abbr
         or re.search(r"\b(phthalic|isophthalic|terephthalic|succinic|sebacic|adipic|glutaric|malonic|maleic|fumaric)\b", name)
         or re.search(r"\bmah\b|\bhhpa\b|\bmhhpa\b", a)
     ):
         return "acid_anhydride"
 
     # Epoxy family
-    if ("epoxy" in name) or ("oxirane" in name) or re.search(r"\b(epoxide|glycidyl|oxiran)\b", name):
-        # Resin vs diluent (best effort)
-        if ("bisphenol" in name) or ("novolac" in name) or ("resin" in name) or re.search(r"\bdgeba\b|\bdgebf\b", a):
+    if (
+        "epoxy" in name
+        or "oxirane" in name
+        or "glycid" in name
+        or int(T.loc[abbr, "__epoxy_fn__"]) > 0
+        or re.search(r"\bdgeba\b|\bdgebf\b|\bdgef\b|\bdge\b|\bge\b", a)
+    ):
+        if (
+            "bisphenol" in name
+            or "novolac" in name
+            or "resin" in name
+            or re.search(r"\bdgeba\b|\bdgebf\b|\bdgef\b", a)
+        ):
             return "epoxy_resin"
-        if ("glycidyl" in name) or ("diluent" in name):
-            return "reactive_diluent"
-        return "epoxy_resin"
+        return "reactive_diluent"
 
+    # Hardeners
     if (
         "amine" in name
         or "diamin" in name
@@ -282,7 +354,7 @@ def classify_row(abbr: str, row: pd.Series) -> str:
     ):
         return "epoxy_hardener"
 
-    # Vinyl family
+    # Vinyl monomers
     if (
         "styrene" in name
         or "acrylonitrile" in name
@@ -290,11 +362,11 @@ def classify_row(abbr: str, row: pd.Series) -> str:
         or "acrylate" in name
         or "vinyl acetate" in name
         or "alpha-methylstyrene" in name
-        or re.search(r"\bst\b|\ban\b|\bmma\b|\bva\b|\bvac\b|\bfn\b|\bα-ms\b|\ba-ms\b", a)
+        or re.search(r"\bst\b|\ban\b|\bmma\b|\bva\b|\bvac\b|\bfn\b|\ba-ms\b|\bα-ms\b", a)
     ):
         return "vinyl_monomer"
 
-    # Solvents / plasticizers
+    # Solvents/plasticizers (expanded)
     if (
         "alcohol" in name
         or "solvent" in name
@@ -303,12 +375,17 @@ def classify_row(abbr: str, row: pd.Series) -> str:
         or "phosphate" in name
         or "adipate" in name
         or "benzoate" in name
-        or re.search(r"\bethanol\b|\bmethanol\b|\bpropanol\b|\bbutanol\b", name)
+        or "citrate" in name
+        or re.search(r"\b(acetone|mek|mibk|thf|dmf|dmso|nmp|dmac|toluene|xylene|ethyl acetate|butyl acetate|heptane|hexane|cyclohexane|isopropanol|ethanol|methanol|butanol|dioxane|chloroform|dichloromethane)\b", name)
+        or re.search(r"\b(etoh|meoh|ipoh|ipa|nproh|bnoh|thf|dmf|dmso|nmp|dmac|tol|xyl|ea|ba|mek|mibk|dcm|chl|dbp|dehp|dinp)\b", a)
     ):
         return "solvent_plasticizer"
 
     # Silanes
-    if ("silane" in name) or re.search(r"\bteos\b|\bvtms\b|\baptes\b|\bmptes\b", a):
+    if (
+        "silane" in name
+        or re.search(r"\bteos\b|\bvtms\b|\bvtmsoh\b|\baptes\b|\bmptes\b|\bgpts\b|\bgptms\b", a)
+    ):
         return "silane"
 
     return "other"
@@ -316,34 +393,22 @@ def classify_row(abbr: str, row: pd.Series) -> str:
 T["__class__"] = [classify_row(i, T.loc[i]) for i in T.index]
 
 def list_by_class(cls: str) -> list[str]:
-    return [i for i in T.index if T.loc[i, "__class__"] == cls]
+    opts = [i for i in T.index if T.loc[i, "__class__"] == cls]
+    return list(dict.fromkeys(opts))
 
 def select_abbr(title: str, options: list[str], key: str):
     if not options:
         st.warning(f"No options found for: {title}")
         return None
-    options = list(dict.fromkeys([o for o in options if o in T.index]))
-    labels = [label(o) for o in options]
-    # disambiguate identical labels
-    seen = {}
-    final_labels = []
-    for lab in labels:
-        if lab not in seen:
-            seen[lab] = 1
-            final_labels.append(lab)
-        else:
-            seen[lab] += 1
-            final_labels.append(f"{lab} (dup {seen[lab]})")
-    mapping = dict(zip(final_labels, options))
-    choice = st.selectbox(title, final_labels, key=key)
-    return mapping[choice]
+    options = list(dict.fromkeys(options))
+    return st.selectbox(title, options, key=key, format_func=label)
 
 def show_props(abbr: str):
     if not abbr:
         return
     row = T.loc[abbr]
     cols_show = []
-    for k in ["name", "cas", "smiles", "dD", "dP", "dH", "da", "sig"]:
+    for k in ["name", "cas", "smiles", "mw", "dD", "dP", "dH", "da", "sig"]:
         c = COL.get(k)
         if c and c in row.index:
             cols_show.append(c)
@@ -354,92 +419,16 @@ def show_props(abbr: str):
         if isinstance(v, (float, int, np.floating, np.integer)) and not pd.isna(v):
             if k in {COL["dD"], COL["dP"], COL["dH"], COL.get("da"), COL.get("sig")}:
                 out[k] = f"{float(v):.2f}"
+            elif k == COL.get("mw"):
+                out[k] = f"{float(v):.2f}"
             else:
                 out[k] = str(v)
         else:
             out[k] = "" if pd.isna(v) else str(v)
+    out["epoxy_function_est"] = str(int(T.loc[abbr, "__epoxy_fn__"]))
+    ee = estimate_EEW_from_db_or_mw(abbr)
+    out["EEW_est (g/eq)"] = "" if (not np.isfinite(ee)) else f"{ee:.1f}"
     st.write(pd.DataFrame.from_dict(out, orient="index", columns=["value"]))
-
-# =========================
-# Epoxy functionality estimation (monofunctional filter)
-# =========================
-_OXIRANE_PATTERNS = [
-    r"C1OC1", r"O1CC1", r"C1CO1",   # common oxirane encodings
-    r"c1oc1", r"o1cc1", r"c1co1",
-]
-_GLYCIDYL_KEYWORDS = ["glycidyl", "oxirane", "epoxide", "epoxy"]
-
-def estimate_epoxy_functionality(abbr: str) -> int | None:
-    """
-    Estimate number of epoxide (oxirane) rings from SMILES/BigSMILES if available.
-    If SMILES is missing, fallback to name heuristics (lower confidence).
-
-    Returns:
-      - integer >= 0 when estimated
-      - None when cannot estimate
-    """
-    smi = _smiles_of(abbr)
-    if smi:
-        # Remove whitespace and try to count explicit oxirane ring patterns
-        s = re.sub(r"\s+", "", smi)
-        cnt = 0
-        for pat in _OXIRANE_PATTERNS:
-            cnt += len(re.findall(pat, s))
-        # Additional heuristic: count 'O1CC1' variants where ring numbering may differ (rare)
-        # Keep conservative to avoid false positives.
-        if cnt > 0:
-            return int(cnt)
-        # If SMILES includes explicit "oxirane" in BigSMILES annotations
-        if "oxirane" in s.lower() or "epoxide" in s.lower():
-            return 1  # conservative default
-        return 0
-
-    # Fallback to name-based estimate
-    name = _name_of(abbr).lower()
-    if any(k in name for k in _GLYCIDYL_KEYWORDS):
-        # Try to catch "di-" / "tri-" / "tetra-" glycidyl wording in names
-        if re.search(r"\b(di|bis)\b", name):
-            return 2
-        if re.search(r"\btri\b", name):
-            return 3
-        if re.search(r"\btetra\b", name):
-            return 4
-        return 1
-
-    # Abbrev hints (very conservative)
-    a = abbr.lower()
-    if "gma" in a or "glycer" in a:
-        return 1
-
-    return None
-
-# Precompute (fast enough for typical DB sizes; cached by Streamlit reruns)
-@st.cache_data
-def build_epoxy_func_table(index_list: list[str]) -> pd.Series:
-    d = {}
-    for ab in index_list:
-        d[ab] = estimate_epoxy_functionality(ab)
-    return pd.Series(d)
-
-EP_FUNC = build_epoxy_func_table(list(T.index))
-
-def is_monofunctional_epoxy(abbr: str) -> bool:
-    v = EP_FUNC.get(abbr, None)
-    return (v is not None) and (int(v) == 1)
-
-def looks_like_epoxy_candidate(abbr: str) -> bool:
-    # Used to broaden candidates when DB classification doesn't explicitly mark diluents
-    nm = _name_of(abbr).lower()
-    smi = _smiles_of(abbr).lower()
-    if any(k in nm for k in _GLYCIDYL_KEYWORDS):
-        return True
-    if any(k in smi for k in ["oxirane", "epoxide"]) and (EP_FUNC.get(abbr, 0) not in (0, None)):
-        return True
-    # If the SMILES has at least one oxirane ring
-    v = EP_FUNC.get(abbr, None)
-    if v is not None and v >= 1:
-        return True
-    return False
 
 # =========================
 # PLOTS
@@ -478,11 +467,11 @@ def plot_scatter(df: pd.DataFrame, x: str, y: str, hue: str, title: str, xlabel:
 tab_form, tab_maps, tab_figs = st.tabs(["Formulator", "Heatmaps", "FIGURES: Ra vs Δδa and Ra vs Π"])
 
 # =========================
-# EQUIV LIB EDITOR (top of Formulator)
+# EQUIV LIB EDITOR
 # =========================
 def equiv_editor():
     with st.expander("📚 Library of equivalents (editable)", expanded=False):
-        st.caption("Matching is done by **Abbrev** (case-insensitive). You can edit values and they will be used to auto-fill the stoichiometry inputs.")
+        st.caption("Matching is done by **Abbrev** (case-insensitive). You can edit values and they will be used to auto-fill stoichiometry inputs.")
         df = get_equiv_df()
         df_edit = st.data_editor(
             df,
@@ -490,18 +479,12 @@ def equiv_editor():
             num_rows="dynamic",
             key="equiv_editor",
         )
-        # normalize + save
         df_edit = df_edit.copy()
         if "Abbrev" in df_edit.columns:
             df_edit["Abbrev"] = df_edit["Abbrev"].map(_norm_abbr)
         st.session_state["equiv_lib"] = df_edit
 
 def sync_from_library(selection_key: str, value_key_map: dict, enabled: bool):
-    """
-    If enabled, reads the selected Abbrev from st.session_state[selection_key]
-    and updates st.session_state[...] numeric inputs according to value_key_map,
-    e.g. {"NCO_%": "pu_nco", "OH_mgKOH_g": "pu_oh_pol"}.
-    """
     if not enabled:
         return
     abbr = st.session_state.get(selection_key)
@@ -516,54 +499,11 @@ def sync_from_library(selection_key: str, value_key_map: dict, enabled: bool):
             continue
         st.session_state[state_key] = float(v)
 
-# =========================
-# Build lists (with epoxy diluent monofunctional expansion)
-# =========================
-def build_role_lists():
-    eqdf = get_equiv_df()
-    roles = {}
-    if ("Abbrev" in eqdf.columns) and ("Role" in eqdf.columns):
-        r = eqdf.set_index("Abbrev")["Role"].astype(str).str.lower()
-        roles = r.to_dict()
-
-    isos = list_by_class("isocyanate")
-    polyols = list_by_class("polyol")
-    extenders = sorted(set(list_by_class("extender") + [a for a,v in roles.items() if "extender" in v]))
-    crosslinkers = sorted(set(list_by_class("crosslinker") + [a for a,v in roles.items() if ("crosslinker" in v or "triol" in v)]))
-
-    acids = sorted(set(list_by_class("acid_anhydride") + [a for a,v in roles.items() if ("acid" in v or "anhydride" in v or "diacid" in v)]))
-
-    ep_resins = sorted(set(list_by_class("epoxy_resin") + [a for a,v in roles.items() if v == "epoxy resin"]))
-    ep_hards  = sorted(set(list_by_class("epoxy_hardener") + [a for a,v in roles.items() if ("hardener" in v or "amine" in v)]))
-    ep_dils   = sorted(set(list_by_class("reactive_diluent") + [a for a,v in roles.items() if "diluent" in v]))
-
-    mons = list_by_class("vinyl_monomer")
-    solv = list_by_class("solvent_plasticizer")
-    sil  = list_by_class("silane")
-
-    # Filter to those present in DB
-    def _keep(lst): return [x for x in lst if x in T.index]
-    return {
-        "isos": _keep(isos),
-        "polyols": _keep(polyols),
-        "extenders": _keep(extenders),
-        "crosslinkers": _keep(crosslinkers),
-        "acids": _keep(acids),
-        "ep_resins": _keep(ep_resins),
-        "ep_hards": _keep(ep_hards),
-        "ep_dils": _keep(ep_dils),
-        "mons": _keep(mons),
-        "solv": _keep(solv),
-        "sil": _keep(sil),
-        "roles": roles,
-    }
-
 # -------------------------
 # FORMULATOR
 # -------------------------
 with tab_form:
     st.subheader("Formulator")
-
     equiv_editor()
 
     mode = st.selectbox(
@@ -572,81 +512,42 @@ with tab_form:
         key="mode_select",
     )
 
-    L = build_role_lists()
-    isos = L["isos"]
-    polyols = L["polyols"]
-    extenders = L["extenders"]
-    crosslinkers = L["crosslinkers"]
-    ep_resins = L["ep_resins"]
-    ep_hards = L["ep_hards"]
-    ep_dils_base = L["ep_dils"]
+    # Candidate pools
+    isos = list_by_class("isocyanate")
+    polyols = list_by_class("polyol")
+    extenders = list_by_class("extender")
+    crosslinkers = list_by_class("crosslinker")
+
+    # Epoxy pools
+    ep_resins = list_by_class("epoxy_resin")
+    ep_hards  = list_by_class("epoxy_hardener")
+    ep_dils_all = sorted(set(
+        list_by_class("reactive_diluent")
+        + [a for a in T.index if (int(T.loc[a, "__epoxy_fn__"]) >= 1 and T.loc[a, "__class__"] != "epoxy_resin")]
+    ))
+
+    # Enrich lists using equivalents library roles (editable)
+    eqdf = get_equiv_df()
+    _role = eqdf.set_index("Abbrev")["Role"].astype(str).str.lower() if "Role" in eqdf.columns else pd.Series(dtype=str)
+
+    extenders = sorted(set(extenders + [a for a,r in _role.items() if "extender" in r]))
+    crosslinkers = sorted(set(crosslinkers + [a for a,r in _role.items() if ("crosslinker" in r or "triol" in r)]))
+    ep_resins = sorted(set(ep_resins + [a for a,r in _role.items() if r.strip() == "epoxy resin"]))
+    ep_hards  = sorted(set(ep_hards  + [a for a,r in _role.items() if ("hardener" in r or "amine" in r)]))
+    ep_dils_all = sorted(set(ep_dils_all + [a for a,r in _role.items() if "diluent" in r]))
+
+    # Filter to compounds that exist in the database
+    extenders = [e for e in extenders if e in T.index]
+    crosslinkers = [x for x in crosslinkers if x in T.index]
+    ep_resins = [e for e in ep_resins if e in T.index]
+    ep_hards  = [e for e in ep_hards if e in T.index]
+    ep_dils_all = [e for e in ep_dils_all if e in T.index]
 
     # global maxima for Π normalization
     da_max = float(np.nanmax(T[COL["da"]])) if (COL.get("da") and COL["da"] in T.columns) else 1.0
     ds_max = float(np.nanmax(T[COL["sig"]])) if (COL.get("sig") and COL["sig"] in T.columns) else 1.0
 
     lock = st.checkbox("🔒 Auto-fill stoichiometry inputs from the equivalents library", value=True, key="lock_to_lib")
-
-    # Epoxy monofunctional expansion controls (formulator-scoped)
-    with st.expander("🧩 Epoxy reactive diluent selection (article-aligned)", expanded=False):
-        st.caption(
-            "When the database does not explicitly label reactive diluents, the app can **estimate epoxy functionality** "
-            "from SMILES/BigSMILES and include **monofunctional epoxides (f≈1)** as reactive diluent candidates."
-        )
-        include_estimated_mono = st.checkbox(
-            "Include estimated monofunctional epoxides (f≈1) as reactive diluents",
-            value=True,
-            key="ep_include_est_mono",
-        )
-        strict_mono_only = st.checkbox(
-            "Restrict diluent list to monofunctional only (f=1)",
-            value=True,
-            key="ep_mono_only",
-        )
-        show_epoxy_func_table = st.checkbox(
-            "Show epoxy functionality table (debug)",
-            value=False,
-            key="ep_show_func",
-        )
-
-    # Build epoxy diluent list: base + estimated candidates
-    ep_dils = list(ep_dils_base)
-    if include_estimated_mono:
-        est_mono = [ab for ab in T.index if is_monofunctional_epoxy(ab)]
-        # optionally broaden candidates beyond monofunctional-only list
-        ep_dils = sorted(set(ep_dils + est_mono))
-
-    # If strict monofunctional: keep only those with f=1 (when estimate exists), but keep explicit diluents that lack SMILES estimate
-    if strict_mono_only:
-        _kept = []
-        for ab in ep_dils:
-            v = EP_FUNC.get(ab, None)
-            if v is None:
-                # keep explicit reactive diluents from DB/library even if function cannot be estimated
-                # (important when SMILES missing)
-                if (ab in ep_dils_base) or (L["roles"].get(ab, "").lower().find("diluent") >= 0):
-                    _kept.append(ab)
-            else:
-                if int(v) == 1:
-                    _kept.append(ab)
-        ep_dils = sorted(set(_kept))
-
-    # Final safety fallback: if still empty, include any "epoxy candidates" with f>=1 and prefer f=1 if strict_mono_only
-    if not ep_dils:
-        cand = [ab for ab in T.index if looks_like_epoxy_candidate(ab)]
-        if strict_mono_only:
-            cand = [ab for ab in cand if is_monofunctional_epoxy(ab)]
-        ep_dils = sorted(set(cand))
-
-    if show_epoxy_func_table:
-        df_func = pd.DataFrame({
-            "Abbrev": list(T.index),
-            "Name": [_name_of(a) for a in T.index],
-            "Epoxy_func_est": [EP_FUNC.get(a, None) for a in T.index],
-            "Class": [T.loc[a, "__class__"] for a in T.index],
-        })
-        df_func = df_func[df_func["Epoxy_func_est"].notna()].sort_values(["Epoxy_func_est", "Abbrev"])
-        st.dataframe(df_func, use_container_width=True, hide_index=True)
 
     if mode == "Pair screening":
         st.markdown("### Pair screening")
@@ -681,7 +582,7 @@ with tab_form:
 
     elif mode == "PU stoichiometry (NCO/OH)":
         st.markdown("### PU stoichiometry (NCO/OH)")
-        st.caption("Uses %NCO and OH number. Inputs can be auto-filled from the internal equivalents library.")
+        st.caption("Uses %NCO and OH number. Inputs auto-update when you change Polyol/Extender/Crosslinker (if values exist in the equivalents library).")
 
         c1, c2, c3 = st.columns(3)
         with c1:
@@ -700,7 +601,7 @@ with tab_form:
         if use_xl:
             xl = select_abbr("Crosslinker/triol", crosslinkers, key="pu_xl")
 
-        # Callbacks: when selection changes, update numeric inputs
+        # auto-fill from library (will work because session_state stores Abbrev)
         sync_from_library("pu_iso", {"NCO_%": "pu_nco"}, lock)
         sync_from_library("pu_pol", {"OH_mgKOH_g": "pu_oh_pol"}, lock)
         if use_ext and ext:
@@ -782,22 +683,9 @@ with tab_form:
             r4.metric("Extender (g)", f"{m_ext:.2f}" if (use_ext and ext) else "0.00")
             r5.metric("Crosslinker (g)", f"{m_xl:.2f}" if (use_xl and xl) else "0.00")
 
-            st.markdown("#### Compatibility indices (screening)")
-            rows = []
-            for comp_id, tag in [(pol, "polyol")] + ([(ext, "extender")] if (use_ext and ext) else []) + ([(xl, "crosslinker")] if (use_xl and xl) else []):
-                a = T.loc[comp_id]; b = T.loc[iso]
-                ra = Ra(a, b); da = delta_a(a, b); ds = delta_sigmaL(a, b)
-                pi = Pi(da, ds, da_max, ds_max)
-                rows.append({"pair": f"{tag} × isocyanate", "A": comp_id, "B": iso, "Ra": ra, "Δδa": da, "ΔσL": ds, "Π": pi})
-            dfm = pd.DataFrame(rows)
-            if not dfm.empty:
-                raM = float(dfm["Ra"].max()); daM = float(dfm["Δδa"].max()); piM = float(dfm["Π"].max())
-                dfm["Score_%"] = [score_percent(r, d, p, raM, daM, piM) for r, d, p in zip(dfm["Ra"], dfm["Δδa"], dfm["Π"])]
-                st.dataframe(dfm.round({"Ra": 2, "Δδa": 2, "ΔσL": 2, "Π": 3, "Score_%": 1}), use_container_width=True, hide_index=True)
-
     elif mode == "Epoxy stoichiometry (EEW/AHEW)":
         st.markdown("### Epoxy stoichiometry (EEW/AHEW)")
-        st.caption("Total mass targeting. Inputs can be auto-filled from the internal equivalents library.")
+        st.caption("Reactive diluent accepts any epoxy candidate filtered by **estimated epoxy functionality** (from SMILES/name).")
 
         c1, c2, c3 = st.columns(3)
         with c1:
@@ -807,16 +695,22 @@ with tab_form:
         with c3:
             use_dil = st.checkbox("Include reactive diluent", value=False, key="ep_use_dil")
 
+        fn_target = st.slider("Reactive diluent — epoxy functionality filter (estimated)", 1, 4, 1, step=1, key="ep_fn_target")
+        ep_dils = [a for a in ep_dils_all if int(T.loc[a, "__epoxy_fn__"]) == int(fn_target)]
+        if use_dil and (not ep_dils):
+            ep_dils = [a for a in ep_dils_all if int(T.loc[a, "__epoxy_fn__"]) >= 1]
+
         dil = None
         if use_dil:
-            # This list is now article-aligned: any estimated monofunctional epoxy can appear here.
-            dil = select_abbr("Reactive diluent (monofunctional epoxy, f≈1)", ep_dils, key="ep_dil")
+            dil = select_abbr("Reactive diluent", ep_dils, key="ep_dil")
 
-        # auto-fill from library
         sync_from_library("ep_resin", {"EEW_g_eq": "ep_eew"}, lock)
         sync_from_library("ep_hard", {"AHEW_g_eq": "ep_ahew"}, lock)
+
         if use_dil and dil:
-            sync_from_library("ep_dil", {"EEW_g_eq": "ep_dil_eew"}, lock)
+            ee = estimate_EEW_from_db_or_mw(dil)
+            if np.isfinite(ee):
+                st.session_state["ep_dil_eew"] = float(ee)
 
         st.markdown("#### Inputs")
         cc1, cc2, cc3 = st.columns(3)
@@ -831,14 +725,6 @@ with tab_form:
         with cc3:
             ratio = st.number_input("Epoxy/Active-H eq ratio", min_value=0.5, max_value=2.0, value=1.0, step=0.01, key="ep_ratio")
 
-        # Optional: show estimated epoxy functionality of selected diluent
-        if use_dil and dil:
-            f_est = EP_FUNC.get(dil, None)
-            if f_est is None:
-                st.info("Epoxy functionality estimate for selected diluent: **n/a** (missing SMILES/name cues).")
-            else:
-                st.info(f"Epoxy functionality estimate for selected diluent: **f = {int(f_est)}** (from SMILES/name heuristics).")
-
         mass_mode = st.radio("Mass target mode", ["Total mass (includes hardener)", "Resin-side mass (resin+diluent)"], horizontal=True, key="ep_mass_mode")
         target = st.number_input("Target mass (g)", min_value=1.0, value=100.0, step=1.0, key="ep_target")
 
@@ -851,7 +737,7 @@ with tab_form:
                                       step=1.0, key="ep_dil_eew")
 
         term = (1.0 - dil_frac) / EEW_res + (dil_frac / EEW_dil if (use_dil and dil) else 0.0)
-        g = (AHEW / max(ratio, 1e-12)) * term  # hardener mass per resin-side mass
+        g = (AHEW / max(ratio, 1e-12)) * term
 
         if resin and hard:
             if mass_mode == "Resin-side mass (resin+diluent)":
@@ -873,33 +759,60 @@ with tab_form:
             r3.metric("Resin (g)", f"{m_res:.2f}")
             r4.metric("Reactive diluent (g)", f"{m_dil:.2f}" if (use_dil and dil) else "0.00")
 
-            st.markdown("#### Compatibility indices (screening)")
-            rows = []
-            for comp_id, tag in [(hard, "hardener")] + ([(dil, "diluent")] if (use_dil and dil) else []):
-                a = T.loc[comp_id]; b = T.loc[resin]
-                ra = Ra(a, b); da = delta_a(a, b); ds = delta_sigmaL(a, b)
-                pi = Pi(da, ds, da_max, ds_max)
-                rows.append({"pair": f"{tag} × resin", "A": comp_id, "B": resin, "Ra": ra, "Δδa": da, "ΔσL": ds, "Π": pi})
-            dfm = pd.DataFrame(rows)
-            if not dfm.empty:
-                raM = float(dfm["Ra"].max()); daM = float(dfm["Δδa"].max()); piM = float(dfm["Π"].max())
-                dfm["Score_%"] = [score_percent(r, d, p, raM, daM, piM) for r, d, p in zip(dfm["Ra"], dfm["Δδa"], dfm["Π"])]
-                st.dataframe(dfm.round({"Ra": 2, "Δδa": 2, "ΔσL": 2, "Π": 3, "Score_%": 1}), use_container_width=True, hide_index=True)
-
     else:
-        st.markdownжин
+        st.markdown("### Ranking (best combinations)")
+        st.caption("Ranks candidates by **Score_%** combining Ra + Δδa + Π (equal weighting, normalized within the candidate set).")
 
-    # NOTE:
-    # You asked to keep the Heatmaps/Figures modules as in your provided code.
-    # They are included below unchanged in structure; only the epoxy diluent list used there is expanded similarly.
+        family = st.selectbox("Family", ["PU", "Epoxy"], key="rk_family")
+
+        if family == "Epoxy":
+            resin = select_abbr("Resin (fixed)", ep_resins, key="rk_ep_resin")
+            include_dil = st.checkbox("Include reactive diluents in ranking", value=True, key="rk_ep_dil")
+            fn_target = st.slider("Reactive diluent epoxy functionality (ranking)", 1, 4, 1, step=1, key="rk_ep_fn")
+            dil_cand = [a for a in ep_dils_all if int(T.loc[a, "__epoxy_fn__"]) == int(fn_target)]
+            cand = ep_hards + (dil_cand if include_dil else [])
+            cand = [c for c in cand if c in T.index]
+            if resin and cand:
+                rows = []
+                for c in cand:
+                    if c == resin:
+                        continue
+                    a = T.loc[c]; b = T.loc[resin]
+                    ra = Ra(a, b); da = delta_a(a, b); ds = delta_sigmaL(a, b)
+                    pi = Pi(da, ds, da_max, ds_max)
+                    rows.append({"candidate": c, "type": T.loc[c, "__class__"], "Ra": ra, "Δδa": da, "ΔσL": ds, "Π": pi})
+                dfc = pd.DataFrame(rows)
+                raM = float(dfc["Ra"].max()); daM = float(dfc["Δδa"].max()); piM = float(dfc["Π"].max())
+                dfc["Score_%"] = [score_percent(r, d, p, raM, daM, piM) for r, d, p in zip(dfc["Ra"], dfc["Δδa"], dfc["Π"])]
+                dfc = dfc.sort_values("Score_%", ascending=False)
+                st.dataframe(dfc.round({"Ra": 2, "Δδa": 2, "ΔσL": 2, "Π": 3, "Score_%": 1}), use_container_width=True, hide_index=True)
+
+        else:
+            iso = select_abbr("Isocyanate (fixed)", isos, key="rk_pu_iso")
+            include_ext = st.checkbox("Include extenders and crosslinkers in ranking", value=True, key="rk_pu_ext")
+            cand = polyols + ((extenders + crosslinkers) if include_ext else [])
+            cand = [c for c in cand if c in T.index]
+            if iso and cand:
+                rows = []
+                for c in cand:
+                    if c == iso:
+                        continue
+                    a = T.loc[c]; b = T.loc[iso]
+                    ra = Ra(a, b); da = delta_a(a, b); ds = delta_sigmaL(a, b)
+                    pi = Pi(da, ds, da_max, ds_max)
+                    rows.append({"candidate": c, "type": T.loc[c, "__class__"], "Ra": ra, "Δδa": da, "ΔσL": ds, "Π": pi})
+                dfc = pd.DataFrame(rows)
+                raM = float(dfc["Ra"].max()); daM = float(dfc["Δδa"].max()); piM = float(dfc["Π"].max())
+                dfc["Score_%"] = [score_percent(r, d, p, raM, daM, piM) for r, d, p in zip(dfc["Ra"], dfc["Δδa"], dfc["Π"])]
+                dfc = dfc.sort_values("Score_%", ascending=False)
+                st.dataframe(dfc.round({"Ra": 2, "Δδa": 2, "ΔσL": 2, "Π": 3, "Score_%": 1}), use_container_width=True, hide_index=True)
 
 # -------------------------
-# HEATMAPS
+# HEATMAPS (as in your build, but fixed lists)
 # -------------------------
 with tab_maps:
     st.subheader("Heatmaps (grouped by purpose)")
 
-    # Metric selector (matches the manuscript descriptors)
     metric = st.radio("Heatmap metric", ["Ra", "Δδa", "Π"], horizontal=True, key="hm_metric")
 
     purpose = st.selectbox(
@@ -915,41 +828,48 @@ with tab_maps:
         key="hm_use_all_defaults",
     )
 
-    L = build_role_lists()
-    acids = L["acids"]
-    isos = L["isos"]
-    polyols = L["polyols"]
-    extenders = L["extenders"]
-    crosslinkers = L["crosslinkers"]
-    ep_resins = L["ep_resins"]
-    ep_hards = L["ep_hards"]
-    ep_dils_base = L["ep_dils"]
-    mons = L["mons"]
-    solv = L["solv"]
-    sil = L["sil"]
+    acids = list_by_class("acid_anhydride")
+    isos = list_by_class("isocyanate")
+    polyols = list_by_class("polyol")
+    extenders = list_by_class("extender")
+    crosslinkers = list_by_class("crosslinker")
 
-    # Expand epoxy diluents here too (article-aligned)
-    ep_dils = list(ep_dils_base)
-    if st.session_state.get("ep_include_est_mono", True):
-        ep_dils = sorted(set(ep_dils + [ab for ab in T.index if is_monofunctional_epoxy(ab)]))
-    if st.session_state.get("ep_mono_only", True):
-        _kept = []
-        for ab in ep_dils:
-            v = EP_FUNC.get(ab, None)
-            if v is None:
-                if (ab in ep_dils_base) or (L["roles"].get(ab, "").lower().find("diluent") >= 0):
-                    _kept.append(ab)
-            else:
-                if int(v) == 1:
-                    _kept.append(ab)
-        ep_dils = sorted(set(_kept))
-    if not ep_dils:
-        cand = [ab for ab in T.index if looks_like_epoxy_candidate(ab)]
-        if st.session_state.get("ep_mono_only", True):
-            cand = [ab for ab in cand if is_monofunctional_epoxy(ab)]
-        ep_dils = sorted(set(cand))
+    ep_resins = list_by_class("epoxy_resin")
+    ep_hards  = list_by_class("epoxy_hardener")
+    ep_dils_all = sorted(set(
+        list_by_class("reactive_diluent")
+        + [a for a in T.index if (int(T.loc[a, "__epoxy_fn__"]) >= 1 and T.loc[a, "__class__"] != "epoxy_resin")]
+    ))
+    mons = list_by_class("vinyl_monomer")
+    solv = list_by_class("solvent_plasticizer")
+    sil = list_by_class("silane")
 
-    # Normalization constants for Π (computed from the loaded database)
+    # Enrich lists using the editable equivalents library (roles)
+    eqdf_hm = get_equiv_df()
+    _role = eqdf_hm.set_index("Abbrev")["Role"].astype(str).str.lower() if "Role" in eqdf_hm.columns else pd.Series(dtype=str)
+
+    acids = sorted(set(acids + [a for a,r in _role.items() if r in ("diacid","acid","anhydride","acid/anhydride")]))
+    extenders = sorted(set(extenders + [a for a,r in _role.items() if "extender" in r]))
+    crosslinkers = sorted(set(crosslinkers + [a for a,r in _role.items() if ("crosslinker" in r or "triol" in r)]))
+    ep_resins = sorted(set(ep_resins + [a for a,r in _role.items() if r == "epoxy resin"]))
+    ep_hards  = sorted(set(ep_hards  + [a for a,r in _role.items() if ("hardener" in r or "amine" in r)]))
+    ep_dils_all = sorted(set(ep_dils_all + [a for a,r in _role.items() if "diluent" in r]))
+    mons = sorted(set(mons + [a for a,r in _role.items() if ("vinyl" in r or "monomer" in r)]))
+    solv = sorted(set(solv + [a for a,r in _role.items() if ("solvent" in r or "plasticizer" in r)]))
+    sil  = sorted(set(sil  + [a for a,r in _role.items() if "silane" in r]))
+
+    # Filter to compounds that exist in the database
+    acids = [a for a in acids if a in T.index]
+    extenders = [a for a in extenders if a in T.index]
+    crosslinkers = [a for a in crosslinkers if a in T.index]
+    ep_resins = [a for a in ep_resins if a in T.index]
+    ep_hards  = [a for a in ep_hards if a in T.index]
+    ep_dils_all = [a for a in ep_dils_all if a in T.index]
+    mons = [a for a in mons if a in T.index]
+    solv = [a for a in solv if a in T.index]
+    sil  = [a for a in sil if a in T.index]
+
+    # Normalization constants for Π
     da_max_hm = float(np.nanmax(T[COL["da"]])) if (COL.get("da") and COL["da"] in T.columns) else 1.0
     ds_max_hm = float(np.nanmax(T[COL["sig"]])) if (COL.get("sig") and COL["sig"] in T.columns) else 1.0
 
@@ -968,7 +888,7 @@ with tab_maps:
                     mat.loc[r, c] = Ra(a, b)
                 elif metric == "Δδa":
                     mat.loc[r, c] = da
-                else:  # Π
+                else:
                     mat.loc[r, c] = Pi(da, ds, da_max_hm, ds_max_hm)
         return mat
 
@@ -1071,6 +991,11 @@ with tab_maps:
             fig = plot_heatmap(mat, f"EPOXY — Hardeners × Resins ({metric})", cbar_label)
             st.pyplot(fig)
 
+        fn_target = st.slider("Reactive diluents — epoxy functionality (heatmap)", 1, 4, 1, step=1, key="hm_ep_fn")
+        ep_dils = [a for a in ep_dils_all if int(T.loc[a, "__epoxy_fn__"]) == int(fn_target)]
+        if not ep_dils:
+            ep_dils = [a for a in ep_dils_all if int(T.loc[a, "__epoxy_fn__"]) >= 1]
+
         dil_sel = st.multiselect(
             "Reactive diluents (rows)",
             ep_dils,
@@ -1095,10 +1020,12 @@ with tab_maps:
         sol_sel = st.multiselect(
             "Solvents/plasticizers (cols)",
             solv,
-            default=solv,
+            default=_default(solv, 18),
             format_func=label,
             key="hm_vinyl_solv",
         )
+        if not solv:
+            st.warning("No solvents/plasticizers found. Check classification keywords or add them to the equivalents library with Role='Solvent'/'Plasticizer'.")
         if mon_sel and sol_sel:
             mat = build_matrix(mon_sel, sol_sel)
             fig = plot_heatmap(mat, f"VINYLS — Monomers × Solvents/Plasticizers ({metric})", cbar_label)
@@ -1114,7 +1041,6 @@ with tab_maps:
             key="hm_silanes",
         )
 
-        # Targets: alcohols/water (by name) + vinyl monomers + selected polyols
         target_pool = []
         for ab in T.index:
             nm = _name_of(ab).lower()
@@ -1147,8 +1073,8 @@ with tab_figs:
     def _def(opts, n):
         return opts if use_all_fig else opts[:n]
 
-    da_max = float(np.nanmax(T[COL["da"]])) if (COL.get("da") and COL["da"] in T.columns) else 1.0
-    ds_max = float(np.nanmax(T[COL["sig"]])) if (COL.get("sig") and COL["sig"] in T.columns) else 1.0
+    da_max_f = float(np.nanmax(T[COL["da"]])) if (COL.get("da") and COL["da"] in T.columns) else 1.0
+    ds_max_f = float(np.nanmax(T[COL["sig"]])) if (COL.get("sig") and COL["sig"] in T.columns) else 1.0
 
     def make_pairs(A_list, B_list, tagA="A", tagB="B", hue_name="pair"):
         rows = []
@@ -1161,74 +1087,49 @@ with tab_figs:
                 ra = Ra(a, b)
                 da = delta_a(a, b)
                 ds = delta_sigmaL(a, b)
-                pi = Pi(da, ds, da_max, ds_max)
+                pi = Pi(da, ds, da_max_f, ds_max_f)
                 rows.append({"A": a_id, "B": b_id, "Ra": ra, "Δδa": da, "ΔσL": ds, "Π": pi, hue_name: f"{tagA}×{tagB}"})
         return pd.DataFrame(rows)
 
-    L = build_role_lists()
-    acids = L["acids"]
-    isos = L["isos"]
-    polyols = L["polyols"]
-    extenders = L["extenders"]
-    crosslinkers = L["crosslinkers"]
-    ep_resins = L["ep_resins"]
-    ep_hards = L["ep_hards"]
-    mons = L["mons"]
-    solv = L["solv"]
-    sil = L["sil"]
-
-    # Use same epoxy diluent expansion as elsewhere
-    ep_dils = list(L["ep_dils"])
-    if st.session_state.get("ep_include_est_mono", True):
-        ep_dils = sorted(set(ep_dils + [ab for ab in T.index if is_monofunctional_epoxy(ab)]))
-    if st.session_state.get("ep_mono_only", True):
-        _kept = []
-        for ab in ep_dils:
-            v = EP_FUNC.get(ab, None)
-            if v is None:
-                if (ab in L["ep_dils"]) or (L["roles"].get(ab, "").lower().find("diluent") >= 0):
-                    _kept.append(ab)
-            else:
-                if int(v) == 1:
-                    _kept.append(ab)
-        ep_dils = sorted(set(_kept))
-    if not ep_dils:
-        cand = [ab for ab in T.index if looks_like_epoxy_candidate(ab)]
-        if st.session_state.get("ep_mono_only", True):
-            cand = [ab for ab in cand if is_monofunctional_epoxy(ab)]
-        ep_dils = sorted(set(cand))
-
     if fam == "Polyesters":
-        A = st.multiselect("Polyols", polyols, default=_def(polyols, 10), format_func=label)
-        B = st.multiselect("Acids/anhydrides", acids, default=_def(acids, 10), format_func=label)
+        A = st.multiselect("Polyols", sorted(set(list_by_class("polyol") + list_by_class("extender") + list_by_class("crosslinker"))),
+                           default=_def(sorted(set(list_by_class("polyol") + list_by_class("extender") + list_by_class("crosslinker"))), 10),
+                           format_func=label)
+        B = st.multiselect("Acids/anhydrides", list_by_class("acid_anhydride"), default=_def(list_by_class("acid_anhydride"), 10), format_func=label)
         dfp = make_pairs(A, B, tagA="polyol", tagB="acid")
     elif fam == "Polyurethanes":
-        iso_sel = st.multiselect("Isocyanates", isos, default=_def(isos, 8), format_func=label)
-        pol_sel = st.multiselect("Polyols", polyols, default=_def(polyols, 10), format_func=label)
-        alc_sel = st.multiselect("Alcohols (extenders + crosslinkers)", sorted(set(extenders + crosslinkers)),
-                                 default=_def(sorted(set(extenders + crosslinkers)), 10), format_func=label)
+        iso_sel = st.multiselect("Isocyanates", list_by_class("isocyanate"), default=_def(list_by_class("isocyanate"), 8), format_func=label)
+        pol_sel = st.multiselect("Polyols", list_by_class("polyol"), default=_def(list_by_class("polyol"), 10), format_func=label)
+        alc_sel = st.multiselect("Alcohols (extenders + crosslinkers)", sorted(set(list_by_class("extender") + list_by_class("crosslinker"))),
+                                 default=_def(sorted(set(list_by_class("extender") + list_by_class("crosslinker"))), 10),
+                                 format_func=label)
         df1 = make_pairs(pol_sel, iso_sel, tagA="polyol", tagB="iso")
         df2 = make_pairs([a for a in alc_sel if a in T.index], iso_sel, tagA="alc", tagB="iso")
         dfp = pd.concat([df1, df2], ignore_index=True) if (not df1.empty or not df2.empty) else pd.DataFrame()
     elif fam == "Epoxies":
-        res_sel = st.multiselect("Resins", ep_resins, default=_def(ep_resins, 5), format_func=label)
-        hard_sel = st.multiselect("Hardeners", ep_hards, default=_def(ep_hards, 10), format_func=label)
-        dil_sel = st.multiselect("Reactive diluents (monofunctional, f≈1)", ep_dils, default=_def(ep_dils, 12), format_func=label)
+        res_sel = st.multiselect("Resins", list_by_class("epoxy_resin"), default=_def(list_by_class("epoxy_resin"), 5), format_func=label)
+        hard_sel = st.multiselect("Hardeners", list_by_class("epoxy_hardener"), default=_def(list_by_class("epoxy_hardener"), 10), format_func=label)
+        fn_target = st.slider("Reactive diluents — epoxy functionality (figures)", 1, 4, 1, step=1, key="fig_ep_fn")
+        dils_all = sorted(set(list_by_class("reactive_diluent") + [a for a in T.index if (int(T.loc[a, "__epoxy_fn__"]) >= 1 and T.loc[a, "__class__"] != "epoxy_resin")]))
+        dils = [a for a in dils_all if int(T.loc[a, "__epoxy_fn__"]) == int(fn_target)]
+        if not dils:
+            dils = [a for a in dils_all if int(T.loc[a, "__epoxy_fn__"]) >= 1]
+        dil_sel = st.multiselect("Reactive diluents", dils, default=_def(dils, 12), format_func=label)
         df1 = make_pairs(hard_sel, res_sel, tagA="hard", tagB="resin")
         df2 = make_pairs(dil_sel, res_sel, tagA="dil", tagB="resin")
         dfp = pd.concat([df1, df2], ignore_index=True) if (not df1.empty or not df2.empty) else pd.DataFrame()
     elif fam == "Vinyls":
-        mon_sel = st.multiselect("Monomers", mons, default=mons, format_func=label)
-        sol_sel = st.multiselect("Solvents/plasticizers", solv, default=solv, format_func=label)
+        mon_sel = st.multiselect("Monomers", list_by_class("vinyl_monomer"), default=_def(list_by_class("vinyl_monomer"), 18), format_func=label)
+        sol_sel = st.multiselect("Solvents/plasticizers", list_by_class("solvent_plasticizer"), default=_def(list_by_class("solvent_plasticizer"), 18), format_func=label)
         dfp = make_pairs(mon_sel, sol_sel, tagA="mon", tagB="solv")
     else:
-        sil_sel = st.multiselect("Silanes", sil, default=_def(sil, 10), format_func=label)
+        sil_sel = st.multiselect("Silanes", list_by_class("silane"), default=_def(list_by_class("silane"), 10), format_func=label)
         target_pool = []
         for ab in T.index:
             nm = _name_of(ab).lower()
             if "water" in nm or "alcohol" in nm:
                 target_pool.append(ab)
-        target_pool = sorted(set(target_pool + _def(mons, 10) + _def(polyols, 10)))
+        target_pool = sorted(set(target_pool + _def(list_by_class("vinyl_monomer"), 10) + _def(list_by_class("polyol"), 10)))
         tar_sel = st.multiselect("Targets", target_pool, default=_def(target_pool, 12), format_func=label)
         dfp = make_pairs(sil_sel, tar_sel, tagA="sil", tagB="target")
 
