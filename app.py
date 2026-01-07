@@ -1,4 +1,15 @@
 # DiPEVa Formulator — Streamlit App
+
+# -----------------------------
+# Safe numeric parsing helpers
+# -----------------------------
+def _to_float(x):
+    """Safe float conversion (no try/except blocks)."""
+    try:
+        return float(x)
+    except Exception:
+        return float("nan")
+
 # Academic / research use only — screening tool, not a standalone decision device.
 
 import re
@@ -163,8 +174,8 @@ if "__is_polymeric__" not in T.columns:
             nm = (T.loc[ab, name_col] if (name_col and name_col in T.columns) else "")
             smi = (T.loc[ab, smi_col] if (smi_col and smi_col in T.columns) else "")
             mw  = (T.loc[ab, mw_col]  if (mw_col  and mw_col  in T.columns) else float("nan"))
-        mw = pd.to_numeric(mw, errors='coerce')
-                mw = float("nan")
+mw = _to_float(mw)
+mw = _to_float(mw)
             flags.append(bool(_is_polymeric_like(ab, nm, smi, mw)))
         T["__is_polymeric__"] = flags
         T["__is_polymeric__"] = False
@@ -276,7 +287,7 @@ def estimate_OH_number_from_mw(abbr: str, f: int = 2) -> Optional[float]:
         if (mw_col is None) or (mw_col not in T.columns) or (ab not in T.index):
             return None
         mw = T.loc[ab, mw_col]
-        mw = float(mw) if (mw is not None and not pd.isna(mw)) else float("nan")
+mw = _to_float(mw) if (mw is not None and not pd.isna(mw)) else float("nan")
         if (not np.isfinite(mw)) or (mw <= 0):
             return None
         return float(56100.0 * float(f) / float(mw))
