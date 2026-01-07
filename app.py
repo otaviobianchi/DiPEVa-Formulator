@@ -163,7 +163,7 @@ if "__is_polymeric__" not in T.columns:
             nm = (T.loc[ab, name_col] if (name_col and name_col in T.columns) else "")
             smi = (T.loc[ab, smi_col] if (smi_col and smi_col in T.columns) else "")
             mw  = (T.loc[ab, mw_col]  if (mw_col  and mw_col  in T.columns) else float("nan"))
-                mw = float(mw) if not pd.isna(mw) else float("nan")
+        mw = float(mw) if not pd.isna(mw) else float("nan")
             except Exception:
                 mw = float("nan")
             flags.append(bool(_is_polymeric_like(ab, nm, smi, mw)))
@@ -528,7 +528,7 @@ turn float(eq["EEW_g_eq"])
     if eew_col:
         v = T.loc[abbr, eew_col]
             if not pd.isna(v):
-                return float(v)
+        return float(v)
         except Exception:
             pass
 
