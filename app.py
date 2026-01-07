@@ -298,23 +298,10 @@ def estimate_epoxy_function(abbr: str) -> int:
             smi = v.strip()
 
     if smi:
-        s = smi
-        # Common epoxide ring patterns in SMILES:
-        #   - C1OC1 (oxirane)
-        #   - C1CO1 / O1CC1 (equivalent orderings)
-        # Also catch substituted patterns like O1C(C)C1 etc.
-        pats = [
-            r"C1OC1",
-            r"C1CO1",
-            r"O1CC1",
-            r"O1C[^\n]{0,8}?C1",  # short ring fragment
-        ]
-        cnt = 0
-        for p in pats[:3]:
-            cnt = max(cnt, len(re.findall(p, s)))
-        # If the strict patterns fail, try the looser one once
-        if cnt == 0 and re.search(pats[3], s):
-            cnt = 1
+        # Use a digit-robust ring counter (supports C1CO1, C2CO2, ...)
+        # This fixes cases like BDGE: O(CC1CO1)....O(CC2CO2) where two distinct
+        # epoxide rings exist but only "1"-based regexes would count one.
+        cnt = _count_epoxide_rings(smi)
         if cnt > 0:
             return int(min(cnt, 4))
 
