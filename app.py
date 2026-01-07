@@ -701,8 +701,7 @@ with tab_form:
             return int(v)
         except Exception:
             return 0
-
-    epoxy_candidates = [ab for ab in T.index if _epoxy_fn(ab) > 0 or T.loc[ab, "__class__"] in ("epoxy_resin", "reactive_diluent")]
+    epoxy_candidates = [ab for ab in T.index if (_epoxy_fn_hm(ab) > 0) or (T.loc[ab, "__class__"] in ("epoxy_resin", "reactive_diluent"))]
 
     # roles from library
     eqdf = get_equiv_df()
@@ -883,40 +882,8 @@ with tab_form:
         with c3:
             use_dil = st.checkbox("Include reactive diluent", value=False, key="ep_use_dil")
 
-        fn_filter = st.selectbox(
-            "Reactive diluent — epoxy functionality filter (estimated)",
-            ["All", 1, 2, 3, 4],
-            index=0,
-            key="ep_fn_filter",
-        )
-
-        # Build a *broad* diluent pool:
-        # - anything explicitly classified as reactive_diluent,
-        # - anything marked as "diluent" in the equivalents library,
-        # - plus any epoxy-containing molecule (epoxy_fn>=1) that is NOT a resin or a hardener.
-        role_map = get_equiv_df().set_index("Abbrev")["Role"].astype(str).str.lower()
-        dil_role = [a for a, r in role_map.items() if "diluent" in r]
-        ep_dils_all = sorted(
-            set(
-                list_by_class("reactive_diluent")
-                + dil_role
-                + [
-                    a
-                    for a in T.index
-                    if (int(T.loc[a, "__epoxy_fn__"]) >= 1)
-                    and (a not in ep_resins)
-                    and (a not in ep_hards)
-                ]
-            )
-        )
-        ep_dils_all = [a for a in ep_dils_all if a in T.index]
-
-        if fn_filter == "All":
-            ep_dils = ep_dils_all
-        else:
-            ep_dils = [a for a in ep_dils_all if int(T.loc[a, "__epoxy_fn__"]) == int(fn_filter)]
-            if not ep_dils:
-                ep_dils = ep_dils_all
+        fn_target = st.slider("Reactive diluent — epoxy functionality filter (estimated)", 1, 4, 1, step=1, key="ep_fn_target")
+        ep_dils = [a for a in EPOXY_CANDIDATES if int(T.loc[a, "__epoxy_fn__"]) == int(fn_target)]
         if use_dil and (not ep_dils):
             ep_dils = [a for a in EPOXY_CANDIDATES if int(T.loc[a, "__epoxy_fn__"]) >= 1]
 
@@ -988,40 +955,282 @@ with tab_form:
         if family == "Epoxy":
             resin = select_abbr("Resin (fixed)", ep_resins, key="rk_ep_resin")
             include_dil = st.checkbox("Include reactive diluents in ranking", value=True, key="rk_ep_dil")
-            fn_filter = st.selectbox(
-            "Reactive diluent — epoxy functionality filter (estimated)",
-            ["All", 1, 2, 3, 4],
-            index=0,
-            key="ep_fn_filter",
-        )
+            fn_target = st.slider("Reactive diluent epoxy functionality (ranking)", 1, 4, 1, step=1, key="rk_ep_fn")
+            dil_cand = [a for a in EPOXY_CANDIDATES if int(T.loc[a, "__epoxy_fn__"]) == int(fn_target)]
+            cand = ep_hards + (dil_cand if include_dil else [])
+            cand = [c for c in cand if c in T.index]
+            if resin and cand:
+                rows = []
+                for c in cand:
+                    if c == resin:
+                        continue
+                    a = T.loc[c]; b = T.loc[resin]
+                    ra = Ra(a, b); da = delta_a(a, b); ds = delta_sigmaL(a, b)
+                    pi = Pi(da, ds, da_max, ds_max)
+                    rows.append({"candidate": c, "type": T.loc[c, "__class__"], "Ra": ra, "Δδa": da, "ΔσL": ds, "Π": pi})
+                dfc = pd.DataFrame(rows)
+                raM = float(dfc["Ra"].max()); daM = float(dfc["Δδa"].max()); piM = float(dfc["Π"].max())
+                dfc["Score_%"] = [score_percent(r, d, p, raM, daM, piM) for r, d, p in zip(dfc["Ra"], dfc["Δδa"], dfc["Π"])]
+                dfc = dfc.sort_values("Score_%", ascending=False)
+                st.dataframe(dfc.round({"Ra": 2, "Δδa": 2, "ΔσL": 2, "Π": 3, "Score_%": 1}), use_container_width=True, hide_index=True)
 
-        # Build a *broad* diluent pool:
-        # - anything explicitly classified as reactive_diluent,
-        # - anything marked as "diluent" in the equivalents library,
-        # - plus any epoxy-containing molecule (epoxy_fn>=1) that is NOT a resin or a hardener.
-        role_map = get_equiv_df().set_index("Abbrev")["Role"].astype(str).str.lower()
-        dil_role = [a for a, r in role_map.items() if "diluent" in r]
-        ep_dils_all = sorted(
-            set(
-                list_by_class("reactive_diluent")
-                + dil_role
-                + [
-                    a
-                    for a in T.index
-                    if (int(T.loc[a, "__epoxy_fn__"]) >= 1)
-                    and (a not in ep_resins)
-                    and (a not in ep_hards)
-                ]
-            )
-        )
-        ep_dils_all = [a for a in ep_dils_all if a in T.index]
-
-        if fn_filter == "All":
-            ep_dils = ep_dils_all
         else:
-            ep_dils = [a for a in ep_dils_all if int(T.loc[a, "__epoxy_fn__"]) == int(fn_filter)]
-            if not ep_dils:
-                ep_dils = ep_dils_all
+            iso = select_abbr("Isocyanate (fixed)", isos, key="rk_pu_iso")
+            include_ext = st.checkbox("Include extenders and crosslinkers in ranking", value=True, key="rk_pu_ext")
+            cand = polyols + ((extenders + crosslinkers) if include_ext else [])
+            cand = [c for c in cand if c in T.index]
+            if iso and cand:
+                rows = []
+                for c in cand:
+                    if c == iso:
+                        continue
+                    a = T.loc[c]; b = T.loc[iso]
+                    ra = Ra(a, b); da = delta_a(a, b); ds = delta_sigmaL(a, b)
+                    pi = Pi(da, ds, da_max, ds_max)
+                    rows.append({"candidate": c, "type": T.loc[c, "__class__"], "Ra": ra, "Δδa": da, "ΔσL": ds, "Π": pi})
+                dfc = pd.DataFrame(rows)
+                raM = float(dfc["Ra"].max()); daM = float(dfc["Δδa"].max()); piM = float(dfc["Π"].max())
+                dfc["Score_%"] = [score_percent(r, d, p, raM, daM, piM) for r, d, p in zip(dfc["Ra"], dfc["Δδa"], dfc["Π"])]
+                dfc = dfc.sort_values("Score_%", ascending=False)
+                st.dataframe(dfc.round({"Ra": 2, "Δδa": 2, "ΔσL": 2, "Π": 3, "Score_%": 1}), use_container_width=True, hide_index=True)
+
+# -------------------------
+# HEATMAPS (as in your build, but fixed lists)
+# -------------------------
+with tab_maps:
+    st.subheader("Heatmaps (grouped by purpose)")
+
+    metric = st.radio("Heatmap metric", ["Ra", "Δδa", "Π"], horizontal=True, key="hm_metric")
+
+    purpose = st.selectbox(
+        "Purpose",
+        ["Polyesters", "Polyurethanes", "Epoxies", "Vinyls", "Silanes"],
+        key="hm_purpose",
+    )
+
+    use_all_defaults = st.checkbox(
+        "Use full lists by default (recommended)",
+        value=True,
+        help="If disabled, the app preselects only the first items to keep figures small.",
+        key="hm_use_all_defaults",
+    )
+
+    acids = list_by_class("acid_anhydride")
+    isos = list_by_class("isocyanate")
+    polyols = list_by_class("polyol")
+    extenders = list_by_class("extender")
+    crosslinkers = list_by_class("crosslinker")
+
+    # Candidate pools for heatmaps
+    acids = list_by_class("acid_anhydride")
+    isos = list_by_class("isocyanate")
+    polyols = list_by_class("polyol")
+    extenders = list_by_class("extender")
+    crosslinkers = list_by_class("crosslinker")
+
+    # Epoxy pools for heatmaps (same logic as Formulator)
+    def _epoxy_fn_hm(ab: str) -> int:
+        try:
+            v = T.loc[ab, "__epoxy_fn__"] if "__epoxy_fn__" in T.columns else 0
+            if pd.isna(v):
+                return 0
+            return int(v)
+        except Exception:
+            return 0
+    epoxy_candidates = [ab for ab in T.index if (_epoxy_fn_hm(ab) > 0) or (T.loc[ab, "__class__"] in ("epoxy_resin", "reactive_diluent"))]
+
+    mons = list_by_class("vinyl_monomer")
+    solv = list_by_class("solvent_plasticizer")
+    # Fallback: if solvent/plasticizer class is empty (depends on database naming),
+    # derive a reasonable solvent/plasticizer pool directly from names/abbreviations.
+    if not solv:
+        solv_guess = []
+        solv_keys = [
+            "solvent","plasticizer","diluent","thinner",
+            "acetone","methyl ethyl ketone","mek","mibk","ketone",
+            "toluene","xylene","ethyl acetate","butyl acetate","acetate",
+            "thf","tetrahydrofuran","dmf","dms(o","dmso","nmp",
+            "chloroform","dichloromethane","dcm","hexane","heptane","cyclohexane",
+            "ethanol","methanol","propanol","butanol","isopropanol",
+            "phthalate","adipate","sebacate","citrate","phosphate","benzoate","trimellitate"
+        ]
+        solv_abbr = {
+            "THF","DMF","DMSO","NMP","MEK","MIBK","TOL","XYL","EA","ETAC","BUAC","IPA","ETOH","MEOH",
+            "DBP","DEHP","DINP","DIDP","DOS","DOA","TOTM","TBP","TCP","TEP"
+        }
+        for ab in T.index:
+            nm = _name_of(ab).lower()
+            a = str(ab).upper()
+            if (a in solv_abbr) or any(k in nm for k in solv_keys):
+                solv_guess.append(ab)
+        solv = sorted(set(solv_guess))
+    sil = list_by_class("silane")
+
+    # Enrich lists using the editable equivalents library (roles)
+    eqdf_hm = get_equiv_df()
+    if "Role" in eqdf_hm.columns:
+        _role = eqdf_hm.set_index("Abbrev")["Role"].astype(str).str.lower()
+    else:
+        _role = pd.Series(dtype=str)
+
+    acids = sorted(set(acids + [a for a,r in _role.items() if r.strip() in ("diacid","acid","anhydride","acid/anhydride")]))
+    extenders = sorted(set(extenders + [a for a,r in _role.items() if "extender" in r]))
+    crosslinkers = sorted(set(crosslinkers + [a for a,r in _role.items() if ("crosslinker" in r or "triol" in r)]))
+
+    ep_resins = sorted(set(
+        [ab for ab in epoxy_candidates if _epoxy_fn_hm(ab) >= 2]
+        + list_by_class("epoxy_resin")
+        + [a for a,r in _role.items() if r.strip() == "epoxy resin"]
+    ))
+    ep_hards = sorted(set(
+        list_by_class("epoxy_hardener")
+        + [a for a,r in _role.items() if ("hardener" in r or "amine" in r)]
+    ))
+    ep_dils = sorted(set(
+        [ab for ab in epoxy_candidates if _epoxy_fn_hm(ab) == 1]
+        + list_by_class("reactive_diluent")
+        + [a for a,r in _role.items() if "diluent" in r]
+    ))
+
+    mons = sorted(set(mons + [a for a,r in _role.items() if "vinyl" in r or "monomer" in r]))
+    solv = sorted(set(solv + [a for a,r in _role.items() if "solvent" in r or "plasticizer" in r]))
+    sil  = sorted(set(sil  + [a for a,r in _role.items() if "silane" in r]))
+
+    # Filter to compounds that exist in the database
+    acids = [a for a in acids if a in T.index]
+    extenders = [a for a in extenders if a in T.index]
+    crosslinkers = [a for a in crosslinkers if a in T.index]
+    ep_resins = [a for a in ep_resins if a in T.index]
+    ep_hards  = [a for a in ep_hards if a in T.index]
+    ep_dils   = [a for a in ep_dils if a in T.index]
+    mons = [a for a in mons if a in T.index]
+    solv = [a for a in solv if a in T.index]
+    sil  = [a for a in sil if a in T.index]
+
+    # Normalization constants for Π
+    da_max_hm = float(np.nanmax(T[COL["da"]])) if (COL.get("da") and COL["da"] in T.columns) else 1.0
+    ds_max_hm = float(np.nanmax(T[COL["sig"]])) if (COL.get("sig") and COL["sig"] in T.columns) else 1.0
+
+    def _default(opts, n=12):
+        return opts if use_all_defaults else opts[:min(n, len(opts))]
+
+    def build_matrix(rows, cols):
+        mat = pd.DataFrame(index=rows, columns=cols, dtype=float)
+        for r in rows:
+            a = T.loc[r]
+            for c in cols:
+                b = T.loc[c]
+                da = delta_a(a, b)
+                ds = delta_sigmaL(a, b)
+                if metric == "Ra":
+                    mat.loc[r, c] = Ra(a, b)
+                elif metric == "Δδa":
+                    mat.loc[r, c] = da
+                else:
+                    mat.loc[r, c] = Pi(da, ds, da_max_hm, ds_max_hm)
+        return mat
+
+    cbar_label = (
+        "Ra (MPa$^{1/2}$)" if metric == "Ra" else
+        "Δδa (MPa$^{1/2}$)" if metric == "Δδa" else
+        "Π (dimensionless)"
+    )
+
+    if purpose == "Polyesters":
+        st.caption("Polyols/diols/triols × diacids/anhydrides (heatmap).")
+        left = st.multiselect(
+            "Polyols (rows)",
+            sorted(set(polyols + extenders + crosslinkers)),
+            default=_default(sorted(set(polyols + extenders + crosslinkers)), 18),
+            format_func=label,
+            key="hm_polyesters_rows",
+        )
+        right = st.multiselect(
+            "Acids/anhydrides (cols)",
+            acids,
+            default=_default(acids, 18),
+            format_func=label,
+            key="hm_polyesters_cols",
+        )
+        if left and right:
+            mat = build_matrix(left, right)
+            fig = plot_heatmap(mat, f"POLYESTERS — Polyols/Diols/Triols × Diacids/Anhydrides ({metric})", cbar_label)
+            st.pyplot(fig)
+
+    elif purpose == "Polyurethanes":
+        st.caption("Isocyanates × polyols/extenders/crosslinkers (heatmap).")
+        isos_sel = st.multiselect(
+            "Isocyanates (cols)",
+            isos,
+            default=_default(isos, 10),
+            format_func=label,
+            key="hm_pu_isos",
+        )
+
+        show_ext = st.checkbox("Include extenders", value=True, key="hm_pu_show_ext")
+        show_xl  = st.checkbox("Include crosslinkers/triols", value=False, key="hm_pu_show_xl")
+
+        pol_sel = st.multiselect(
+            "Polyols (rows)",
+            sorted(set(polyols + extenders + crosslinkers)),
+            default=_default(sorted(set(polyols + extenders + crosslinkers)), 18),
+            format_func=label,
+            key="hm_pu_polyols",
+        )
+        if pol_sel and isos_sel:
+            mat = build_matrix(pol_sel, isos_sel)
+            fig = plot_heatmap(mat, f"PU — Polyols × Isocyanates ({metric})", cbar_label)
+            st.pyplot(fig)
+
+        if show_ext:
+            ext_sel = st.multiselect(
+                "Extenders (rows)",
+                extenders,
+                default=_default(extenders, 18),
+                format_func=label,
+                key="hm_pu_extenders",
+            )
+            if ext_sel and isos_sel:
+                mat2 = build_matrix(ext_sel, isos_sel)
+                fig2 = plot_heatmap(mat2, f"PU — Extenders × Isocyanates ({metric})", cbar_label)
+                st.pyplot(fig2)
+
+        if show_xl and crosslinkers:
+            xl_sel = st.multiselect(
+                "Crosslinkers/triols (rows)",
+                crosslinkers,
+                default=_default(crosslinkers, 12),
+                format_func=label,
+                key="hm_pu_crosslinkers",
+            )
+            if xl_sel and isos_sel:
+                mat3 = build_matrix(xl_sel, isos_sel)
+                fig3 = plot_heatmap(mat3, f"PU — Crosslinkers/triols × Isocyanates ({metric})", cbar_label)
+                st.pyplot(fig3)
+
+    elif purpose == "Epoxies":
+        st.caption("Epoxy resins × hardeners and reactive diluents (heatmap).")
+        res_sel = st.multiselect(
+            "Resins (cols)",
+            ep_resins,
+            default=_default(ep_resins, 12),
+            format_func=label,
+            key="hm_ep_resins",
+        )
+        hard_sel = st.multiselect(
+            "Hardeners (rows)",
+            ep_hards,
+            default=_default(ep_hards, 18),
+            format_func=label,
+            key="hm_ep_hards",
+        )
+        if hard_sel and res_sel:
+            mat = build_matrix(hard_sel, res_sel)
+            fig = plot_heatmap(mat, f"EPOXY — Hardeners × Resins ({metric})", cbar_label)
+            st.pyplot(fig)
+
+        fn_target = st.slider("Reactive diluents — epoxy functionality (heatmap)", 1, 4, 1, step=1, key="hm_ep_fn")
+        ep_dils = [a for a in EPOXY_CANDIDATES if int(T.loc[a, "__epoxy_fn__"]) == int(fn_target)]
         if not ep_dils:
             ep_dils = [a for a in EPOXY_CANDIDATES if int(T.loc[a, "__epoxy_fn__"]) >= 1]
 
@@ -1039,6 +1248,18 @@ with tab_form:
 
     elif purpose == "Vinyls":
         st.caption("Vinyl monomers × solvents/plasticizers (heatmap).")
+
+        # Robust solvent/plasticizer pool: if classification is empty, infer from name/abbrev
+        solv_pool = list(solv)
+        if not solv_pool:
+            kw = re.compile(r"(solvent|plasticiz|phthalate|phosphate|adipate|sebacate|citrate|benzoate|carbonate|lactate|glycol ether|ester|ketone|acetate|dmc|dec|dbp|dehp|dinp|dotp|tbp|tcp|tec|atbc)", re.I)
+            abbr_hits = []
+            for ab in T.index:
+                nm = _name_of(ab).lower()
+                if kw.search(nm) or kw.search(ab):
+                    abbr_hits.append(ab)
+            solv_pool = sorted(set(abbr_hits))
+
         mon_sel = st.multiselect(
             "Monomers (rows)",
             mons,
@@ -1048,18 +1269,15 @@ with tab_form:
         )
         sol_sel = st.multiselect(
             "Solvents/plasticizers (cols)",
-            solv,
-            default=_default(solv, 18),
+            solv_pool,
+            default=_default(solv_pool, 18),
             format_func=label,
             key="hm_vinyl_solv",
         )
-        if not solv:
-            st.warning("No solvents/plasticizers found. Check classification keywords or add them to the equivalents library with Role='Solvent'/'Plasticizer'.")
         if mon_sel and sol_sel:
             mat = build_matrix(mon_sel, sol_sel)
             fig = plot_heatmap(mat, f"VINYLS — Monomers × Solvents/Plasticizers ({metric})", cbar_label)
             st.pyplot(fig)
-
     else:
         st.caption("Silane coupling agents × selected targets (heatmap).")
         sil_sel = st.multiselect(
@@ -1138,24 +1356,11 @@ with tab_figs:
     elif fam == "Epoxies":
         res_sel = st.multiselect("Resins", list_by_class("epoxy_resin"), default=_def(list_by_class("epoxy_resin"), 5), format_func=label)
         hard_sel = st.multiselect("Hardeners", list_by_class("epoxy_hardener"), default=_def(list_by_class("epoxy_hardener"), 10), format_func=label)
-        fn_filter = st.selectbox(
-            "Reactive diluents — epoxy functionality filter (figures, estimated)",
-            ["All", 1, 2, 3, 4],
-            index=0,
-            key="fig_ep_fn_filter",
-        )
-        dils_all = sorted(
-            set(
-                list_by_class("reactive_diluent")
-                + [a for a in T.index if (int(T.loc[a, "__epoxy_fn__"]) >= 1)]
-            )
-        )
-        if fn_filter == "All":
-            dils = dils_all
-        else:
-            dils = [a for a in dils_all if int(T.loc[a, "__epoxy_fn__"]) == int(fn_filter)]
-            if not dils:
-                dils = dils_all
+        fn_target = st.slider("Reactive diluents — epoxy functionality (figures)", 1, 4, 1, step=1, key="fig_ep_fn")
+        dils_all = sorted(set(list_by_class("reactive_diluent") + [a for a in T.index if (int(T.loc[a, "__epoxy_fn__"]) >= 1)]))
+        dils = [a for a in dils_all if int(T.loc[a, "__epoxy_fn__"]) == int(fn_target)]
+        if not dils:
+            dils = [a for a in dils_all if int(T.loc[a, "__epoxy_fn__"]) >= 1]
         dil_sel = st.multiselect("Reactive diluents", dils, default=_def(dils, 12), format_func=label)
         df1 = make_pairs(hard_sel, res_sel, tagA="hard", tagB="resin")
         df2 = make_pairs(dil_sel, res_sel, tagA="dil", tagB="resin")
