@@ -163,12 +163,10 @@ if "__is_polymeric__" not in T.columns:
             nm = (T.loc[ab, name_col] if (name_col and name_col in T.columns) else "")
             smi = (T.loc[ab, smi_col] if (smi_col and smi_col in T.columns) else "")
             mw  = (T.loc[ab, mw_col]  if (mw_col  and mw_col  in T.columns) else float("nan"))
-        mw = float(mw) if not pd.isna(mw) else float("nan")
-            except Exception:
+        mw = pd.to_numeric(mw, errors='coerce')
                 mw = float("nan")
             flags.append(bool(_is_polymeric_like(ab, nm, smi, mw)))
         T["__is_polymeric__"] = flags
-    except Exception:
         T["__is_polymeric__"] = False
 
 # =========================
@@ -282,10 +280,8 @@ def estimate_OH_number_from_mw(abbr: str, f: int = 2) -> Optional[float]:
         if (not np.isfinite(mw)) or (mw <= 0):
             return None
         return float(56100.0 * float(f) / float(mw))
-    except Exception:
         return None
         return float(56100.0 * float(f) / float(mw))
-    except Exception:
         return None
 
 
@@ -351,7 +347,6 @@ def _mw_of(abbr: str) -> float:
         return float("nan")
     v = T.loc[abbr, c]
         return float(v)
-    except Exception:
         return float("nan")
 
 # =========================
@@ -498,10 +493,8 @@ if "__class_eff__" not in T.columns:
     fn = T["__epoxy_fn__"].astype(int)
     T.loc[fn >= 2, "__class_eff__"] = "epoxy_resin"
     T.loc[fn == 1, "__class_eff__"] = "reactive_diluent"
-except Exception:
     # fail-safe: keep database class
     T["__class_eff__"] = T.get("__class__", "other").astype(str)
-    except Exception:
         T["__epoxy_fn__"] = 0
 
 def estimate_EEW_from_db_or_mw(abbr: str) -> float:
@@ -513,7 +506,6 @@ def list_polyols(polymeric_only: bool = True) -> list[str]:
     opts = list_polyols(polymeric_only=True)
     if polymeric_only:
             opts = [i for i in opts if bool(T.loc[i, "__is_polymeric__"])]
-        except Exception:
             pass
     return list(dict.fromkeys(opts))
 
@@ -529,7 +521,6 @@ turn float(eq["EEW_g_eq"])
         v = T.loc[abbr, eew_col]
             if not pd.isna(v):
         return float(v)
-        except Exception:
             pass
 
     mw = _mw_of(abbr)
@@ -564,7 +555,6 @@ def _is_epoxy_resin(ab: str) -> bool:
         r = str(ROLE.get(ab, "")).strip().lower()
         if "epoxy resin" in r:
             return True
-    except Exception:
         pass
     return False
 
@@ -574,7 +564,6 @@ def _is_epoxy_hardener(ab: str) -> bool:
         r = str(ROLE.get(ab, "")).strip().lower()
         if "hardener" in r or "amine" in r or "curing" in r:
             return True
-    except Exception:
         pass
     return False
 
@@ -592,7 +581,6 @@ def _is_reactive_diluent(ab: str) -> bool:
             return True
         if int(T.loc[ab, "__epoxy_fn__"]) == 1:
             return True
-    except Exception:
         pass
     return False
 
@@ -705,7 +693,6 @@ def sync_from_library(selection_key: str, value_key_map: dict, enabled: bool, fa
     eq = equiv_lookup(abbr)
     if not eq and fallback is not None:
             eq = fallback(abbr) or {}
-        except Exception:
             eq = {}
     if not eq:
         return
