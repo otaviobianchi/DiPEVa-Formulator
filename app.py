@@ -321,6 +321,10 @@ def estimate_epoxy_function(abbr: str) -> int:
     # --- 2) Heuristics (name/abbr)
     name = _name_of(ab).lower()
 
+    # If SMILES is missing, infer multi-epoxy systems from naming.
+    # Example: cycloaliphatic diepoxies may include "epoxy" twice.
+    epoxy_token_count = len(re.findall(r"epoxy|oxirane", name))
+
     # strong cues
     if any(k in name for k in ["oxirane", "epoxy", "epoxide", "glycidyl"]):
         # mono-glycidyl compounds are typically monofunctional
@@ -328,7 +332,13 @@ def estimate_epoxy_function(abbr: str) -> int:
             return 1
 
         # Strong cues for multi-functional epoxies (resins) even when SMILES is missing
-        if ("cycloaliphatic" in name) or ("aliphatic epoxy" in name) or ("epoxy cycloaliphatic" in name):
+        # - cycloaliphatic diepoxies often contain multiple "epoxy" tokens in the name
+        # - some sources write "epoxy aliphatic" or "aliphatic epoxy"
+        if (
+            (epoxy_token_count >= 2)
+            or ("cycloaliphatic" in name)
+            or re.search(r"aliphatic\s*.*epoxy|epoxy\s*.*aliphatic", name)
+        ):
             return 2
         if "triglycidyl" in name or "glycidyl" in name and "tri" in name:
             return 3
@@ -468,6 +478,18 @@ def classify_row(abbr: str, row: pd.Series) -> str:
         or int(T.loc[abbr, "__epoxy_fn__"]) > 0
         or re.search(r"\bdgeba\b|\bdgebf\b|\bdgef\b|\bdge\b|\bge\b", a)
     ):
+        # Prefer a functionality-based split:
+        #   fn >= 2 => resin (di-/multi-epoxy)
+        #   fn == 1 => reactive diluent (mono-epoxy)
+        # Fall back to name cues if needed.
+        fn = int(T.loc[abbr, "__epoxy_fn__"]) if "__epoxy_fn__" in T.columns else 0
+
+        if fn >= 2:
+            return "epoxy_resin"
+        if fn == 1:
+            return "reactive_diluent"
+
+        # If fn is unknown, use conservative name cues
         if (
             "bisphenol" in name
             or "novolac" in name
