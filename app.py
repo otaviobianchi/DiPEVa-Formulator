@@ -701,7 +701,14 @@ with tab_form:
             return int(v)
         except Exception:
             return 0
-    epoxy_candidates = [ab for ab in T.index if (_epoxy_fn_hm(ab) > 0) or (T.loc[ab, "__class__"] in ("epoxy_resin", "reactive_diluent"))]
+    # NOTE: use the local helper (_epoxy_fn) defined above. Previous builds
+    # referenced an older name (_epoxy_fn_hm), which breaks on Streamlit Cloud.
+    epoxy_candidates = [
+        ab
+        for ab in T.index
+        if (_epoxy_fn(ab) > 0)
+        or (T.loc[ab, "__class__"] in ("epoxy_resin", "reactive_diluent"))
+    ]
 
     # roles from library
     eqdf = get_equiv_df()
