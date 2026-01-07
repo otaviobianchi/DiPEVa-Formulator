@@ -155,7 +155,6 @@ T["__class__"] = [_class_of(a) for a in T.index]
 
 # Precompute polymeric-like flag (used to keep polyol selectors clean)
 if "__is_polymeric__" not in T.columns:
-    try:
         smi_col = COL.get("smiles")
         name_col = COL.get("name")
         mw_col = COL.get("mw")
@@ -164,7 +163,6 @@ if "__is_polymeric__" not in T.columns:
             nm = (T.loc[ab, name_col] if (name_col and name_col in T.columns) else "")
             smi = (T.loc[ab, smi_col] if (smi_col and smi_col in T.columns) else "")
             mw  = (T.loc[ab, mw_col]  if (mw_col  and mw_col  in T.columns) else float("nan"))
-            try:
                 mw = float(mw) if not pd.isna(mw) else float("nan")
             except Exception:
                 mw = float("nan")
@@ -275,7 +273,6 @@ def estimate_OH_number_from_mw(abbr: str, f: int = 2) -> Optional[float]:
     OH# ≈ 56100 * f / MW
     Returns None if MW is missing/non-finite.
     """
-    try:
         ab = str(abbr).strip().upper()
         mw_col = COL.get("mw")
         if (mw_col is None) or (mw_col not in T.columns) or (ab not in T.index):
@@ -353,7 +350,6 @@ def _mw_of(abbr: str) -> float:
     if not c or c not in T.columns:
         return float("nan")
     v = T.loc[abbr, c]
-    try:
         return float(v)
     except Exception:
         return float("nan")
@@ -465,7 +461,27 @@ def estimate_epoxy_function(abbr: str) -> int:
     return 0
 
 if "__epoxy_fn__" not in T.columns:
-    try:
+
+# ------------------------------------------------------------------
+# Effective class used by the app (ARTICLE-CONSISTENT)
+# ------------------------------------------------------------------
+# Priority:
+# 1) Database 'Class' column
+# 2) Enforce epoxy functionality:
+#    - epoxy_fn >= 2  -> epoxy_resin (e.g. BDGE, aliphatic diepoxies)
+#    - epoxy_fn == 1  -> reactive_diluent (mono-epoxies)
+# ------------------------------------------------------------------
+if "__class_eff__" not in T.columns:
+    if "Class" in T.columns:
+        T["__class_eff__"] = T["Class"].astype(str).str.lower()
+    else:
+        T["__class_eff__"] = "other"
+
+if "__epoxy_fn__" in T.columns:
+    T.loc[T["__epoxy_fn__"] >= 2, "__class_eff__"] = "epoxy_resin"
+    T.loc[T["__epoxy_fn__"] == 1, "__class_eff__"] = "reactive_diluent"
+
+
         T["__epoxy_fn__"] = [estimate_epoxy_function(a) for a in T.index]
         T["__epoxy_fn__"] = pd.to_numeric(T["__epoxy_fn__"], errors="coerce").fillna(0).astype(int)
 
@@ -479,7 +495,6 @@ if "__class_eff__" not in T.columns:
     T["__class_eff__"] = T["__class__"].astype(str)
 
 # override only when epoxy functionality is detected
-try:
     fn = T["__epoxy_fn__"].astype(int)
     T.loc[fn >= 2, "__class_eff__"] = "epoxy_resin"
     T.loc[fn == 1, "__class_eff__"] = "reactive_diluent"
@@ -497,7 +512,6 @@ def list_polyols(polymeric_only: bool = True) -> list[str]:
     """Return polyols; by default only polymeric (repeat-unit) entries."""
     opts = list_polyols(polymeric_only=True)
     if polymeric_only:
-        try:
             opts = [i for i in opts if bool(T.loc[i, "__is_polymeric__"])]
         except Exception:
             pass
@@ -513,7 +527,6 @@ turn float(eq["EEW_g_eq"])
             break
     if eew_col:
         v = T.loc[abbr, eew_col]
-        try:
             if not pd.isna(v):
                 return float(v)
         except Exception:
@@ -544,7 +557,6 @@ ROLE = _role_series()
 
 def _is_epoxy_resin(ab: str) -> bool:
     # resin if class says so OR epoxy_fn>=2 OR role says "epoxy resin"
-    try:
         if T.loc[ab, "__class__"] == "epoxy_resin":
             return True
         if int(T.loc[ab, "__epoxy_fn__"]) >= 2:
@@ -557,7 +569,6 @@ def _is_epoxy_resin(ab: str) -> bool:
     return False
 
 def _is_epoxy_hardener(ab: str) -> bool:
-    try:
         if T.loc[ab, "__class__"] == "epoxy_hardener":
             return True
         r = str(ROLE.get(ab, "")).strip().lower()
@@ -574,7 +585,6 @@ def _is_reactive_diluent(ab: str) -> bool:
     - Else if database Class == 'reactive_diluent' -> reactive diluent.
     - Else if epoxy functionality == 1 -> reactive diluent (fallback heuristic).
     """
-    try:
         r = str(ROLE.get(ab, "")).strip().lower()
         if "diluent" in r:
             return True
@@ -694,7 +704,6 @@ def sync_from_library(selection_key: str, value_key_map: dict, enabled: bool, fa
         return
     eq = equiv_lookup(abbr)
     if not eq and fallback is not None:
-        try:
             eq = fallback(abbr) or {}
         except Exception:
             eq = {}
