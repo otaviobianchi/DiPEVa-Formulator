@@ -25,6 +25,8 @@ if not DB_FILE.exists():
     DB_FILE = HERE / "Database_final_classified_full.xlsx"
 if not DB_FILE.exists():
     DB_FILE = HERE / "Database_final.xlsx"
+if not DB_FILE.exists():
+    DB_FILE = HERE / "Database_clean_for_app.xlsx"
 
 # ============================================================
 # HELPERS
@@ -167,7 +169,7 @@ def Ra(a, b):
 
 def delta_a(a, b):
     if COL.get("da") in a and COL.get("da") in b:
-        if not pd.isna(a[COL["da"]]) and not pd.isna(b[COL["da"]):
+        if not pd.isna(a[COL["da"]]) and not pd.isna(b[COL["da"]]):
             return float(abs(a[COL["da"]] - b[COL["da"]]))
     return float(abs(
         np.sqrt(a[COL["dP"]]**2 + a[COL["dH"]]**2) -
@@ -175,7 +177,7 @@ def delta_a(a, b):
     ))
 
 def delta_sigma(a, b):
-    if COL.get("sig") and not pd.isna(a[COL["sig"]]) and not pd.isna(b[COL["sig"]):
+    if COL.get("sig") and not pd.isna(a[COL["sig"]]) and not pd.isna(b[COL["sig"]]):
         return float(abs(a[COL["sig"]] - b[COL["sig"]]))
     return float("nan")
 
