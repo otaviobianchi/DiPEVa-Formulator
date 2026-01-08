@@ -16,7 +16,7 @@ st.set_page_config(page_title="DiPEVa Formulator", layout="wide")
 st.title("🧪 DiPEVa Formulator")
 st.caption("Academic use only — classification-driven screening tool.")
 
-DB_FILE = Path(__file__).resolve().parent / "Database_final_classified_strict_polymeric.xlsx"
+DB_FILE = Path(__file__).resolve().parent / "Database_final_classified_strict.xlsx"
 
 # ============================================================
 # LOAD DATABASE
