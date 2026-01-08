@@ -1,165 +1,126 @@
-
-# DiPEVa Formulator — Streamlit App (REFactored, clean, deterministic)
-# Academic / research use only — screening tool, not a standalone decision device.
+# ============================================================
+# DiPEVa Formulator — Streamlit App
+# App + Article figures (Ra, Δδa, Π)
+# Academic / research use only
+# ============================================================
 
 import re
 from pathlib import Path
-from typing import Optional, Callable
-
 import numpy as np
 import pandas as pd
 import streamlit as st
 import matplotlib.pyplot as plt
 
-# ============================================================
+# ------------------------------------------------------------
 # CONFIG
-# ============================================================
+# ------------------------------------------------------------
 st.set_page_config(page_title="DiPEVa Formulator", layout="wide")
 st.title("🧪 DiPEVa Formulator")
 st.caption("Academic / research use only — screening tool, not a standalone decision device.")
 
 HERE = Path(__file__).resolve().parent
-
 DB_FILE = HERE / "Database_final_classified_strict.xlsx"
-if not DB_FILE.exists():
-    DB_FILE = HERE / "Database_final_classified_full.xlsx"
-if not DB_FILE.exists():
-    DB_FILE = HERE / "Database_final.xlsx"
-if not DB_FILE.exists():
-    DB_FILE = HERE / "Database_clean_for_app.xlsx"
 
-# ============================================================
-# HELPERS
-# ============================================================
-def _to_float(x):
-    try:
-        return float(x)
-    except Exception:
-        return float("nan")
-
-# ============================================================
+# ------------------------------------------------------------
 # LOAD DATABASE
-# ============================================================
+# ------------------------------------------------------------
 @st.cache_data
-def load_db(path: Path) -> pd.DataFrame:
+def load_db(path):
     df = pd.read_excel(path)
     df.columns = [str(c).strip() for c in df.columns]
-    return df.copy()
+    return df
 
-df_raw = load_db(DB_FILE)
+df = load_db(DB_FILE)
 
-def _find_col(cands):
+# ------------------------------------------------------------
+# COLUMN DETECTION (robust)
+# ------------------------------------------------------------
+def find_col(cands):
     for c in cands:
-        if c in df_raw.columns:
+        if c in df.columns:
             return c
-    for c in df_raw.columns:
+    for c in df.columns:
         for k in cands:
-            if k.lower() in str(c).lower():
+            if k.lower() in c.lower():
                 return c
     return None
 
 COL = {
-    "name":   _find_col(["Molecule", "Molecule name", "Name"]),
-    "abbr":   _find_col(["Abbrev", "Abbreviation"]),
-    "cas":    _find_col(["CAS", "CASRN"]),
-    "smiles": _find_col(["SMILES/BigSMILES", "SMILES", "BigSMILES"]),
-    "mw":     _find_col(["MW", "Molecular weight", "MolWt"]),
-    "dD":     _find_col(["δD", "dD"]),
-    "dP":     _find_col(["δP", "dP"]),
-    "dH":     _find_col(["δH", "dH"]),
-    "da":     _find_col(["δa", "delta a"]),
-    "sig":    _find_col(["σL", "surface tension"]),
-    "cls":    _find_col(["Class", "Classification", "__class__", "Role"]),
+    "abbr": find_col(["Abbrev", "Abbreviation"]),
+    "name": find_col(["Name", "Molecule"]),
+    "smiles": find_col(["SMILES", "BigSMILES"]),
+    "mw": find_col(["MW", "Molecular weight"]),
+    "dD": find_col(["δD"]),
+    "dP": find_col(["δP"]),
+    "dH": find_col(["δH"]),
+    "da": find_col(["δa"]),
+    "sig": find_col(["σL"]),
+    "cls": find_col(["Class", "Classification"])
 }
 
-missing = [k for k in ["abbr", "dD", "dP", "dH"] if COL[k] is None]
-if missing:
-    st.error(f"Database missing required columns: {missing}")
-    st.stop()
+# ------------------------------------------------------------
+# CLEAN TABLE
+# ------------------------------------------------------------
+T = df.copy()
+T["__abbr__"] = T[COL["abbr"]].astype(str).str.upper().str.strip()
+T = T.drop_duplicates("__abbr__").set_index("__abbr__", drop=True)
 
-# ============================================================
-# BUILD MASTER TABLE
-# ============================================================
-T = df_raw.copy()
-T["__abbr__"] = (
-    T[COL["abbr"]]
-    .astype(str)
-    .str.strip()
-    .str.upper()
-)
-T = T[T["__abbr__"].ne("")]
-T = T.drop_duplicates("__abbr__", keep="first").set_index("__abbr__")
-
-for k in ["dD", "dP", "dH", "da", "sig", "mw"]:
-    if COL.get(k) and COL[k] in T.columns:
+for k in ["mw", "dD", "dP", "dH", "da", "sig"]:
+    if COL.get(k):
         T[COL[k]] = pd.to_numeric(T[COL[k]], errors="coerce")
 
-# ============================================================
-# CLASS NORMALIZATION (SINGLE SOURCE OF TRUTH)
-# ============================================================
-_CLASS_MAP = {
-    "isocyanate": "isocyanate",
-    "polyol": "polyol",
-    "extender": "extender",
-    "crosslinker": "crosslinker",
-    "acid": "acid_anhydride",
-    "anhydride": "acid_anhydride",
-    "epoxy_resin": "epoxy_resin",
-    "reactive_diluent": "reactive_diluent",
-    "epoxy_hardener": "epoxy_hardener",
-    "vinyl_monomer": "vinyl_monomer",
-    "solvent": "solvent_plasticizer",
-    "plasticizer": "solvent_plasticizer",
-    "silane": "silane",
-}
+# ------------------------------------------------------------
+# POLYMERIC FLAG (polyol hygiene)
+# ------------------------------------------------------------
+def is_polymeric(abbr, name, smiles, mw):
+    a = abbr.upper()
+    n = (name or "").lower()
+    s = (smiles or "")
+    if any(x in s for x in ["{", "}", "[*]"]):
+        return True
+    if re.search(r"(PEG|PPG|PTMEG|PCL|PCDL)\d{2,5}", a):
+        return True
+    if "polyol" in n or "polyether" in n or "polyester" in n:
+        return True
+    if mw and mw >= 250 and "diol" in n:
+        return True
+    return False
 
-def normalize_class(val: str) -> str:
-    if not isinstance(val, str):
-        return "other"
-    s = re.sub(r"[^a-z0-9_]+", "", val.lower().replace(" ", "_"))
-    return _CLASS_MAP.get(s, s or "other")
+T["__is_polymeric__"] = [
+    is_polymeric(
+        ab,
+        T.loc[ab, COL["name"]] if COL["name"] else "",
+        T.loc[ab, COL["smiles"]] if COL["smiles"] else "",
+        T.loc[ab, COL["mw"]] if COL["mw"] else np.nan,
+    )
+    for ab in T.index
+]
 
-T["__class_db__"] = (
-    T[COL["cls"]].astype(str).apply(normalize_class)
-    if COL.get("cls") in T.columns else "other"
-)
-
-# ============================================================
-# EPOXY FUNCTIONALITY (DETERMINISTIC)
-# ============================================================
-def count_epoxy(smiles: str) -> int:
+# ------------------------------------------------------------
+# EPOXY FUNCTIONALITY (SMILES-based)
+# ------------------------------------------------------------
+def count_epoxy(smiles):
     if not isinstance(smiles, str):
         return 0
-    s = smiles.replace(" ", "")
-    return (
-        len(re.findall(r"C(\\d)OC\\1", s)) +
-        len(re.findall(r"C(\\d)CO\\1", s)) +
-        len(re.findall(r"O(\\d)CC\\1", s))
-    )
+    return len(re.findall(r"C\dOC\d|C\dCO\d|O\dCC\d", smiles))
 
-def estimate_epoxy_fn(abbr: str) -> int:
-    smi = T.loc[abbr, COL["smiles"]] if COL.get("smiles") in T.columns else ""
-    n = count_epoxy(str(smi))
-    if n > 0:
-        return min(n, 6)
-    if "DGEBA" in abbr or "DGEBF" in abbr:
-        return 2
-    return 0
+T["__epoxy_fn__"] = [
+    count_epoxy(T.loc[ab, COL["smiles"]]) if COL["smiles"] else 0
+    for ab in T.index
+]
 
-T["__epoxy_fn__"] = [estimate_epoxy_fn(a) for a in T.index]
-
-# ============================================================
+# ------------------------------------------------------------
 # EFFECTIVE CLASS (ARTICLE CONSISTENT)
-# ============================================================
-T["__class_eff__"] = T["__class_db__"]
+# ------------------------------------------------------------
+T["__class_eff__"] = T[COL["cls"]].astype(str).str.lower()
 
-# Enforce epoxy rules
+# epoxy override
 T.loc[T["__epoxy_fn__"] >= 2, "__class_eff__"] = "epoxy_resin"
 T.loc[T["__epoxy_fn__"] == 1, "__class_eff__"] = "reactive_diluent"
 
-# ============================================================
+# ------------------------------------------------------------
 # METRICS
-# ============================================================
+# ------------------------------------------------------------
 def Ra(a, b):
     return float(np.sqrt(
         4*(a[COL["dD"]] - b[COL["dD"]])**2 +
@@ -168,42 +129,143 @@ def Ra(a, b):
     ))
 
 def delta_a(a, b):
-    if COL.get("da") in a and COL.get("da") in b:
-        if not pd.isna(a[COL["da"]]) and not pd.isna(b[COL["da"]]):
-            return float(abs(a[COL["da"]] - b[COL["da"]]))
-    return float(abs(
+    if COL["da"] and not pd.isna(a[COL["da"]]) and not pd.isna(b[COL["da"]]):
+        return abs(a[COL["da"]] - b[COL["da"]])
+    return abs(
         np.sqrt(a[COL["dP"]]**2 + a[COL["dH"]]**2) -
         np.sqrt(b[COL["dP"]]**2 + b[COL["dH"]]**2)
-    ))
+    )
 
 def delta_sigma(a, b):
-    if COL.get("sig") and not pd.isna(a[COL["sig"]]) and not pd.isna(b[COL["sig"]]):
-        return float(abs(a[COL["sig"]] - b[COL["sig"]]))
-    return float("nan")
+    if COL["sig"] and not pd.isna(a[COL["sig"]]) and not pd.isna(b[COL["sig"]]):
+        return abs(a[COL["sig"]] - b[COL["sig"]])
+    return np.nan
 
 def Pi(da, ds, da_max, ds_max):
-    v = da / (da_max + 1e-12)
+    nda = da / (da_max + 1e-9)
     if np.isfinite(ds):
-        v += ds / (ds_max + 1e-12)
-    return float(v)
+        nds = ds / (ds_max + 1e-9)
+        return nda + nds
+    return nda
 
-# ============================================================
+# ------------------------------------------------------------
 # POOLS
-# ============================================================
-def list_by_class(cls):
-    return sorted(T.index[T["__class_eff__"] == cls].tolist())
+# ------------------------------------------------------------
+def by_class(c):
+    return sorted([i for i in T.index if T.loc[i, "__class_eff__"] == c])
 
-# ============================================================
-# UI — MINIMAL, ROBUST
-# ============================================================
-st.sidebar.header("Quick sanity check")
+polyols = [i for i in by_class("polyol") if T.loc[i, "__is_polymeric__"]]
+extenders = by_class("chain_extender_diol")
+isos = by_class("isocyanate")
 
-st.write("### Database summary")
-st.write(
-    T["__class_eff__"].value_counts().rename("count").to_frame()
+ep_resins = by_class("epoxy_resin")
+ep_dils   = by_class("reactive_diluent")
+ep_hards  = by_class("epoxy_hardener_amine")
+
+# ------------------------------------------------------------
+# UI TABS
+# ------------------------------------------------------------
+tab_form, tab_maps, tab_figs = st.tabs(
+    ["Formulator", "Heatmaps", "Figures (Article)"]
 )
 
-st.write("### Sample molecules")
-st.dataframe(T.head(10))
+# ============================================================
+# FORMULATOR
+# ============================================================
+with tab_form:
+    st.subheader("Formulator")
 
-st.success("App core loaded correctly. Heatmaps, figures and formulators can now be safely extended.")
+    fam = st.selectbox("System", ["Polyurethane", "Epoxy"])
+
+    if fam == "Epoxy":
+        r = st.selectbox("Resin", ep_resins)
+        h = st.selectbox("Hardener", ep_hards)
+        d = st.selectbox("Reactive diluent (optional)", ["None"] + ep_dils)
+
+        if r and h:
+            a = T.loc[r]
+            b = T.loc[h]
+            ra = Ra(a, b)
+            da = delta_a(a, b)
+            ds = delta_sigma(a, b)
+
+            st.metric("Ra", f"{ra:.2f}")
+            st.metric("Δδa", f"{da:.2f}")
+            st.metric("ΔσL", f"{ds:.2f}" if np.isfinite(ds) else "n/a")
+
+# ============================================================
+# HEATMAPS
+# ============================================================
+with tab_maps:
+    st.subheader("Heatmaps")
+
+    metric = st.selectbox("Metric", ["Ra", "Δδa", "Π"])
+
+    rows = st.multiselect("Rows", ep_dils, default=ep_dils)
+    cols = st.multiselect("Cols", ep_resins, default=ep_resins)
+
+    if rows and cols:
+        da_max = np.nanmax(T[COL["da"]]) if COL["da"] else 1.0
+        ds_max = np.nanmax(T[COL["sig"]]) if COL["sig"] else 1.0
+
+        M = pd.DataFrame(index=rows, columns=cols)
+
+        for i in rows:
+            for j in cols:
+                a, b = T.loc[i], T.loc[j]
+                if metric == "Ra":
+                    M.loc[i, j] = Ra(a, b)
+                elif metric == "Δδa":
+                    M.loc[i, j] = delta_a(a, b)
+                else:
+                    M.loc[i, j] = Pi(
+                        delta_a(a, b),
+                        delta_sigma(a, b),
+                        da_max, ds_max
+                    )
+
+        fig, ax = plt.subplots(figsize=(0.5*len(cols)+4, 0.4*len(rows)+3))
+        im = ax.imshow(M.values.astype(float))
+        ax.set_xticks(range(len(cols)))
+        ax.set_xticklabels(cols, rotation=90)
+        ax.set_yticks(range(len(rows)))
+        ax.set_yticklabels(rows)
+        fig.colorbar(im, ax=ax)
+        st.pyplot(fig)
+
+# ============================================================
+# FIGURES (ARTICLE)
+# ============================================================
+with tab_figs:
+    st.subheader("Figures for manuscript")
+
+    pairs = []
+    da_max = np.nanmax(T[COL["da"]]) if COL["da"] else 1.0
+    ds_max = np.nanmax(T[COL["sig"]]) if COL["sig"] else 1.0
+
+    for d in ep_dils:
+        for r in ep_resins:
+            a, b = T.loc[d], T.loc[r]
+            pairs.append({
+                "diluent": d,
+                "resin": r,
+                "Ra": Ra(a, b),
+                "Δδa": delta_a(a, b),
+                "Π": Pi(delta_a(a, b), delta_sigma(a, b), da_max, ds_max)
+            })
+
+    DF = pd.DataFrame(pairs)
+
+    fig1, ax1 = plt.subplots()
+    ax1.scatter(DF["Ra"], DF["Δδa"])
+    ax1.set_xlabel("Ra")
+    ax1.set_ylabel("Δδa")
+    st.pyplot(fig1)
+
+    fig2, ax2 = plt.subplots()
+    ax2.scatter(DF["Ra"], DF["Π"])
+    ax2.set_xlabel("Ra")
+    ax2.set_ylabel("Π")
+    st.pyplot(fig2)
+
+    st.dataframe(DF.round(3))
